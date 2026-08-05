@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  chainLabel,
+  explorerTxUrl,
+  shortHash,
+} from "@/lib/explorer";
 
 const STATUS_CLS: Record<string, string> = {
   executed: "text-emerald-300 bg-emerald-400/10",
@@ -12,9 +17,22 @@ const STATUS_CLS: Record<string, string> = {
   executing: "text-cyan-200 bg-cyan-400/10",
 };
 
+type ActionRow = {
+  id: string;
+  type: string;
+  status: string;
+  chainId: number;
+  summary: string;
+  command?: string | null;
+  txHash?: string | null;
+  error?: string | null;
+  createdAt: string;
+};
+
 export default function OverviewPage() {
   const [status, setStatus] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState("");
 
   const load = useCallback(() => {
     fetch("/api/status")
@@ -40,6 +58,16 @@ export default function OverviewPage() {
       load();
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyHash(hash: string) {
+    try {
+      await navigator.clipboard.writeText(hash);
+      setCopied(hash);
+      setTimeout(() => setCopied(""), 1500);
+    } catch {
+      /* ignore */
     }
   }
 
@@ -108,9 +136,14 @@ export default function OverviewPage() {
       </div>
 
       <div className="glass p-5">
-        <h3 className="mb-3 text-sm font-semibold text-[#c8ff4a]">
-          Activity feed
-        </h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-[#c8ff4a]">
+            Activity history
+          </h3>
+          <p className="text-[10px] text-white/35">
+            Tx hash + explorer link when status is executed
+          </p>
+        </div>
         <ul className="space-y-2">
           {(status?.actions || []).length === 0 && (
             <li className="text-sm text-white/40">
@@ -118,21 +151,101 @@ export default function OverviewPage() {
               swap.
             </li>
           )}
-          {(status?.actions || []).map((a: any) => (
-            <li
-              key={a.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs"
-            >
-              <span className="text-white/75">{a.summary}</span>
-              <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                  STATUS_CLS[a.status] || "bg-white/10 text-white/50"
-                }`}
+          {((status?.actions || []) as ActionRow[]).map((a) => {
+            const hasTx =
+              Boolean(a.txHash) &&
+              a.txHash!.startsWith("0x") &&
+              a.txHash!.length >= 66;
+            const explorer = hasTx
+              ? explorerTxUrl(a.chainId, a.txHash!)
+              : null;
+            return (
+              <li
+                key={a.id}
+                className="rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-xs"
               >
-                {a.status}
-              </span>
-            </li>
-          ))}
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-white/80">{a.summary}</p>
+                    <p className="mt-0.5 text-[10px] text-white/35">
+                      {chainLabel(a.chainId)} · {a.type}
+                      {a.createdAt
+                        ? ` · ${new Date(a.createdAt).toLocaleString()}`
+                        : ""}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                      STATUS_CLS[a.status] || "bg-white/10 text-white/50"
+                    }`}
+                  >
+                    {a.status}
+                  </span>
+                </div>
+
+                {/* Transaction hash — verify on explorer */}
+                {hasTx && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-950/30 px-2.5 py-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-emerald-200/70">
+                      Tx hash
+                    </span>
+                    <code className="break-all font-mono text-[11px] text-emerald-100/90">
+                      {shortHash(a.txHash!, 8)}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => void copyHash(a.txHash!)}
+                      className="rounded-md border border-white/15 px-2 py-0.5 text-[10px] text-white/60 hover:bg-white/5 hover:text-white/90"
+                    >
+                      {copied === a.txHash ? "Copied" : "Copy"}
+                    </button>
+                    {explorer && (
+                      <a
+                        href={explorer}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-md bg-[#c8ff4a]/90 px-2 py-0.5 text-[10px] font-semibold text-black hover:bg-[#d4ff6a]"
+                      >
+                        Open explorer ↗
+                      </a>
+                    )}
+                    <details className="w-full">
+                      <summary className="cursor-pointer text-[10px] text-white/35 hover:text-white/55">
+                        Full hash
+                      </summary>
+                      <code className="mt-1 block break-all font-mono text-[10px] text-white/55">
+                        {a.txHash}
+                      </code>
+                    </details>
+                  </div>
+                )}
+
+                {/* Dry-run: show would-be command so user can still verify intent */}
+                {a.status === "dry_run" && a.command && (
+                  <div className="mt-2 rounded-lg border border-purple-400/20 bg-purple-950/25 px-2.5 py-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-purple-200/70">
+                      Would send (dry run — no hash)
+                    </span>
+                    <code className="mt-0.5 block break-all font-mono text-[10px] text-purple-100/75">
+                      {a.command}
+                    </code>
+                  </div>
+                )}
+
+                {a.status === "executed" && !hasTx && (
+                  <p className="mt-2 text-[10px] text-amber-200/70">
+                    Status executed but no tx hash stored — check worker logs.
+                  </p>
+                )}
+
+                {a.error && (
+                  <p className="mt-2 break-words text-[10px] text-rose-300/80">
+                    {a.error}
+                  </p>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>
