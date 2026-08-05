@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #050505;
+  --lime: #c8ff4a;
+  --cyan: #22d3ee;
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--bg);
+  color: #f5f5f5;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  position: relative;
+}
+
+/* Full-site background: endless knot (asset in /public/knot-bg.jpeg) */
+.site-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.site-bg__img {
+  position: absolute;
+  inset: -3%;
+  width: 106%;
+  height: 106%;
+  background-image: url("/knot-bg.jpeg");
+  background-size: cover;
+  background-position: center 40%;
+  background-repeat: no-repeat;
+  /* Stronger presence — knot stays readable behind glass panels */
+  opacity: 0.62;
+  filter: saturate(1.35) contrast(1.18) brightness(1.08);
+  animation: kenburns 40s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.site-bg__veil {
+  position: absolute;
+  inset: 0;
+  /* Lighter veil so the symbol stays visible; still readable text */
+  background:
+    radial-gradient(ellipse 55% 45% at 50% 35%, transparent 0%, rgba(5, 5, 5, 0.25) 55%, rgba(5, 5, 5, 0.55) 100%),
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(34, 211, 238, 0.1), transparent 50%),
+    radial-gradient(ellipse 50% 40% at 85% 95%, rgba(200, 255, 74, 0.07), transparent 45%),
+    linear-gradient(180deg, rgba(5, 5, 5, 0.28) 0%, rgba(5, 5, 5, 0.42) 40%, rgba(5, 5, 5, 0.72) 100%);
+}
+
+@keyframes kenburns {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.06);
+  }
+}
+
+.site-content {
+  position: relative;
+  z-index: 1;
+}
+
+.glass {
+  background: rgba(10, 10, 14, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1rem;
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.btn-primary {
+  @apply rounded-full bg-[#c8ff4a] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#d4ff6a] disabled:opacity-50;
+}
+
+.btn-ghost {
+  @apply rounded-full border border-white/15 px-4 py-2 text-sm text-white/70 transition hover:bg-white/5;
+}
+
+.input {
+  @apply w-full rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-sm text-white outline-none ring-[#c8ff4a]/30 focus:ring-1;
+}
+
+.pill-nav button.active,
+.pill-nav a.active {
+  @apply bg-[#c8ff4a]/20 text-[#c8ff4a];
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-bg__img {
+    animation: none;
+  }
+}

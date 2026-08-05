@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Agent identity (worker EOA)
+model User {
+  id         String   @id @default(cuid())
+  evmAddress String   @unique
+  label      String   @default("ritual-agent")
+  createdAt  DateTime @default(now())
+}
+
+/// type: limit_order | scheduled | instant
+/// action: send | swap | bridge | ritual_ping
+/// chainId: 1979 Ritual | 11155111 Sepolia | 8453 Base (only live DeFi mainnet)
+model Rule {
+  id           String    @id @default(cuid())
+  type         String
+  action       String
+  status       String    @default("active")
+  chainId      Int
+  tokenIn      String?
+  tokenOut     String?
+  amount       String
+  toAddress    String?
+  toChainId    Int?
+  // limit order
+  priceTokenId String?
+  targetPrice  Float?
+  direction    String?
+  // scheduled
+  cron         String?
+  nextRunAt    DateTime?
+  lastRunAt    DateTime?
+  lastError    String?
+  failCount    Int       @default(0)
+  // ritual-native notes (optional JSON)
+  metaJson     String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  actions      Action[]
+}
+
+model Action {
+  id        String   @id @default(cuid())
+  ruleId    String?
+  rule      Rule?    @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  type      String
+  status    String   @default("pending")
+  chainId   Int
+  summary   String
+  command   String?
+  txHash    String?
+  error     String?
+  usdValue  Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

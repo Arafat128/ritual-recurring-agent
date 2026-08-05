@@ -1,0 +1,22 @@
+{
+  "name": "ritual-recurring-agent",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/dashboard",
+    "worker": "npm run start -w apps/worker",
+    "build": "npm run build -w packages/core && npm run build -w apps/dashboard",
+    "db:generate": "prisma generate --schema packages/core/prisma/schema.prisma",
+    "db:push": "prisma db push --schema packages/core/prisma/schema.prisma",
+    "db:studio": "prisma studio --schema packages/core/prisma/schema.prisma",
+    "postinstall": "prisma generate --schema packages/core/prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "typescript": "^5.6.3"
+  }
+}
