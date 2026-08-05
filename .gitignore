@@ -11,3 +11,6 @@ data/agent.pid
 .DS_Store
 .vercel
 tsconfig.tsbuildinfo
+
+.vercel
+.env*
