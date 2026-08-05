@@ -7,6 +7,7 @@ import {
   WORKER,
   agentPrivateKey,
   prisma,
+  getAppLimits,
 } from "@rra/core";
 import { privateKeyToAccount } from "viem/accounts";
 import { processRules } from "./rules.js";
@@ -37,10 +38,14 @@ function writePid() {
 async function main() {
   writePid();
   const account = privateKeyToAccount(agentPrivateKey());
+  const limits = await getAppLimits();
   console.log(
     `[worker] Ritual Recurring Agent pid=${process.pid} DRY_RUN=${isDryRun()}`
   );
   console.log(`[worker] agent EOA ${account.address}`);
+  console.log(
+    `[worker] limits maxTxUsd=$${limits.maxTxUsd} maxTxPerDay=${limits.maxTxPerDay} loop=${limits.loopIntervalMs}ms`
+  );
 
   await prisma.user.upsert({
     where: { evmAddress: account.address.toLowerCase() },
@@ -71,7 +76,10 @@ async function main() {
       await processRules(account.address);
       await setSetting("worker.lastTickAt", new Date().toISOString());
       if (tick % 10 === 0) {
-        console.log(`[worker] heartbeat tick=${tick}`);
+        const L = await getAppLimits();
+        console.log(
+          `[worker] heartbeat tick=${tick} maxTx/day=${L.maxTxPerDay} loop=${L.loopIntervalMs}ms`
+        );
       }
     } catch (e) {
       console.error("[worker] loop error", e);
@@ -81,8 +89,18 @@ async function main() {
     }
   };
 
-  await loop();
-  setInterval(loop, WORKER.loopIntervalMs);
+  // Re-read loop interval from DB each cycle so Settings changes apply without restart
+  const schedule = async () => {
+    await loop();
+    let ms = WORKER.loopIntervalMs;
+    try {
+      ms = (await getAppLimits()).loopIntervalMs;
+    } catch {
+      /* keep default */
+    }
+    setTimeout(() => void schedule(), ms);
+  };
+  void schedule();
 }
 
 main().catch((e) => {

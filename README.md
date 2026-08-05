@@ -69,6 +69,8 @@ RITUAL_SYSTEM = {
 
 **Dry run toggle** — Overview + Settings (DB-backed `worker.dryRun`; worker re-reads each tick).
 
+**Editable app limits** — Settings UI for `maxTxUsd`, `maxTxPerDay`, and worker poll interval (stored in SQLite; overrides `.env` defaults without restart).
+
 ---
 
 ## Architecture
@@ -88,48 +90,161 @@ Same discipline as DeFi Autopilot:
 
 ---
 
-## Setup
+## Local setup tutorial (agent on your machine)
+
+This walkthrough gets the **dashboard + worker agent** running fully local with SQLite.
+
+### Prerequisites
+
+- **Node.js 18+** (20 LTS recommended)
+- **npm** (comes with Node)
+- A **burner EOA** private key (never use a main wallet)
+- Optional: MetaMask for viewing balances / funding the agent
+
+### Step 1 — Clone and install
 
 ```bash
+git clone https://github.com/Arafat128/ritual-recurring-agent.git
 cd ritual-recurring-agent
 npm install
-cp .env.example .env   # Windows: copy .env.example .env
-# set AGENT_PRIVATE_KEY (0x…) — use a burner
-# keep DRY_RUN=true until you verify dry_run logs
-
-npm run db:push
-
-# Terminal 1 — dashboard
-npm run dev
-# → http://localhost:3020
-
-# Terminal 2 — worker
-npm run worker
 ```
 
-Fund the agent on Ritual: [faucet.ritualfoundation.org](https://faucet.ritualfoundation.org).
+`postinstall` generates the Prisma client automatically.
 
-### Useful env
+### Step 2 — Environment file
+
+```bash
+# macOS / Linux
+cp .env.example .env
+
+# Windows (PowerShell)
+copy .env.example .env
+```
+
+Edit `.env` and set at least:
+
+```env
+# SQLite path is relative to packages/core/prisma/schema.prisma
+DATABASE_URL="file:../../../data/ritual-agent.db"
+
+# Burner key only — 0x + 64 hex chars
+AGENT_PRIVATE_KEY=0xYOUR_BURNER_PRIVATE_KEY
+
+# Keep true until activity feed dry_runs look correct
+DRY_RUN=true
+
+# Public Ritual RPC (default is fine for most users)
+RPC_URL_RITUAL=https://rpc.ritualfoundation.org
+```
+
+Optional later:
 
 | Variable | Purpose |
 |----------|---------|
-| `AGENT_PRIVATE_KEY` | Worker EOA (required) |
-| `DRY_RUN` | Env default; UI override stored in DB |
-| `RPC_URL_RITUAL` | Ritual RPC |
-| `RPC_URL_SEPOLIA` | Sepolia RPC |
-| `RPC_URL_BASE` | Base mainnet RPC |
-| `LIFI_API_KEY` | Optional; Base swap/bridge quotes |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Optional notifications |
+| `RPC_URL_SEPOLIA` | Sepolia Uniswap demos |
+| `RPC_URL_BASE` | Base mainnet DeFi |
+| `LIFI_API_KEY` | Live Base swap/bridge quotes |
+| `MAX_TX_USD` / `MAX_TX_PER_DAY` | Default app limits (overridable in **Settings**) |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Optional notify |
+
+### Step 3 — Create the database
+
+```bash
+npm run db:push
+```
+
+This creates `data/ritual-agent.db` (SQLite). No Postgres required.
+
+### Step 4 — Fund the agent (Ritual testnet)
+
+1. Derive the public address from `AGENT_PRIVATE_KEY` (MetaMask import, or worker logs after first start).
+2. Open the faucet: [faucet.ritualfoundation.org](https://faucet.ritualfoundation.org)
+3. Send a small amount of **RITUAL** to the agent address.
+
+You only need gas for **live** sends when dry run is off. Dry-run mode does not broadcast txs.
+
+### Step 5 — Start dashboard + worker (two terminals)
+
+**Terminal 1 — dashboard (UI + API):**
+
+```bash
+npm run dev
+# → http://localhost:3020
+```
+
+**Terminal 2 — worker (the recurring agent loop):**
+
+```bash
+npm run worker
+```
+
+The worker:
+
+- Registers the agent EOA in the DB / status API  
+- Polls every ~30s  
+- Evaluates **active** rules  
+- Writes activity rows (`dry_run`, `executed`, `error`, `skipped`)  
+
+If dry run is **ON** (default), no real chain txs are sent.
+
+### Step 6 — Create your first rule
+
+1. Open **http://localhost:3020**
+2. Confirm **Dry run: ON** on Overview
+3. Go to **Rules** → create e.g. a **scheduled send** on **Ritual (1979)**
+4. Wait for the next worker tick (or use a short cron / instant rule)
+5. Back on **Overview → Activity history**:
+   - You should see `dry_run` rows with the command that *would* run  
+   - **Delete** is available only on `dry_run` and `error` (failed) rows  
+   - **Clear dry-run & failed** removes all of those; **executed** rows are kept  
+
+### Step 7 — Go live (optional, careful)
+
+1. Fund the agent on the target chain (Ritual faucet, Sepolia faucet, or Base real ETH).
+2. Toggle **Dry run OFF** on Overview or Settings (DB override; worker re-reads each tick).
+3. Confirm limits (`MAX_TX_USD`, `MAX_TX_PER_DAY`) before enabling.
+4. Watch **Activity history** for `executed` + **tx hash** + explorer link.
+
+### Production-style local run (optional)
+
+```bash
+npm run build
+# Terminal 1
+npm run start -w apps/dashboard   # or: next start -p 3020 from apps/dashboard
+# Terminal 2
+npm run worker
+```
+
+### Useful scripts
+
+| Script | What it does |
+|--------|----------------|
+| `npm run dev` | Dashboard Next.js dev server (port **3020**) |
+| `npm run worker` | Recurring agent loop |
+| `npm run db:push` | Apply Prisma schema to SQLite |
+| `npm run db:studio` | Browse DB in Prisma Studio |
+| `npm run build` | Build core + dashboard |
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| Worker “offline?” on Overview | Start `npm run worker`; check Terminal 2 logs |
+| No activity rows | Create an **active** rule; wait for next tick (~30s) |
+| `AGENT_PRIVATE_KEY` errors | Must be `0x` + 64 hex; restart worker after editing `.env` |
+| DB path issues | Run commands from repo root; re-run `npm run db:push` |
+| Want to clear test noise | Use **Clear dry-run & failed** on Overview (cannot delete executed) |
 
 ---
 
-## UI flow
+## UI flow (quick)
 
-1. Open dashboard → optional **Connect wallet** (context only)  
-2. **Rules** → scheduled **send / swap / bridge**  
+1. Open dashboard → optional **Connect wallet** (context only; agent key stays in worker `.env`)  
+2. **Rules** → scheduled / instant **send · swap · bridge · ritual_ping**  
 3. Start **worker**  
-4. **Overview** activity feed: `dry_run` / `executed` / `skipped`  
-5. Toggle **Dry run OFF** only after logs look correct  
+4. **Overview** activity: `dry_run` / `executed` / `error` / `skipped`  
+5. Delete **dry-run** or **failed** history anytime; keep real execution audit  
+6. Toggle **Dry run OFF** only after dry-run logs look correct  
 
 ---
 
@@ -139,6 +254,26 @@ Fund the agent on Ritual: [faucet.ritualfoundation.org](https://faucet.ritualfou
 - Base mainnet = real funds when dry run is off  
 - Swaps on Ritual are rejected by design  
 - Bridges from testnets are skipped  
+- Activity delete only allows `dry_run` and `error` — executed txs stay for audit  
+
+---
+
+## Deploy (Vercel dashboard)
+
+The **Next.js dashboard** deploys to Vercel. The **worker** is a long-running process and must run separately (local machine, Railway, Fly, etc.).
+
+```bash
+# from monorepo root
+vercel link          # once
+vercel env add DRY_RUN production   # set true
+vercel --prod
+```
+
+Notes:
+
+- SQLite on Vercel uses `/tmp` (ephemeral per instance). Fine for demos; for shared durable state use Turso/Postgres later.
+- Do **not** put a production `AGENT_PRIVATE_KEY` on Vercel unless you intentionally run txs from serverless (not recommended). Keep the key on the worker host only.
+- Production URL pattern: `https://ritual-recurring-agent.vercel.app` (or your project alias).
 
 ---
 

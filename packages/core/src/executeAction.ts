@@ -9,7 +9,6 @@ import { privateKeyToAccount } from "viem/accounts";
 import { base, sepolia } from "viem/chains";
 import { defineChain } from "viem";
 import {
-  APP_LIMITS,
   getChain,
   getRpcUrl,
   RITUAL_CHAIN_ID,
@@ -19,6 +18,7 @@ import {
 import { prisma } from "./db.js";
 import { agentPrivateKey } from "./env.js";
 import { getDryRun } from "./dryRun.js";
+import { getAppLimits } from "./limits.js";
 import type { ExecResult, TxRequest } from "./types.js";
 
 function chainFor(chainId: number) {
@@ -45,8 +45,9 @@ function startOfUtcDay(): Date {
 }
 
 async function checkAppLimits(tx: TxRequest): Promise<string | null> {
-  if (tx.usdValue > APP_LIMITS.maxTxUsd) {
-    return `App limit: $${tx.usdValue.toFixed(2)} > max $${APP_LIMITS.maxTxUsd}/tx`;
+  const limits = await getAppLimits();
+  if (tx.usdValue > limits.maxTxUsd) {
+    return `App limit: $${tx.usdValue.toFixed(2)} > max $${limits.maxTxUsd}/tx`;
   }
   const since = startOfUtcDay();
   const count = await prisma.action.count({
@@ -55,8 +56,8 @@ async function checkAppLimits(tx: TxRequest): Promise<string | null> {
       createdAt: { gte: since },
     },
   });
-  if (count >= APP_LIMITS.maxTxPerDay) {
-    return `App limit: ${count} actions today ≥ max ${APP_LIMITS.maxTxPerDay}/day`;
+  if (count >= limits.maxTxPerDay) {
+    return `App limit: ${count} actions today ≥ max ${limits.maxTxPerDay}/day`;
   }
   const chain = getChain(tx.chainId);
   if (

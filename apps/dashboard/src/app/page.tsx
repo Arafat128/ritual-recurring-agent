@@ -29,9 +29,12 @@ type ActionRow = {
   createdAt: string;
 };
 
+const DELETABLE_STATUSES = new Set(["dry_run", "error"]);
+
 export default function OverviewPage() {
   const [status, setStatus] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [copied, setCopied] = useState("");
 
   const load = useCallback(() => {
@@ -46,6 +49,11 @@ export default function OverviewPage() {
     const t = setInterval(load, 8_000);
     return () => clearInterval(t);
   }, [load]);
+
+  const actions = (status?.actions || []) as ActionRow[];
+  const deletableCount = actions.filter((a) =>
+    DELETABLE_STATUSES.has(a.status),
+  ).length;
 
   async function toggleDry() {
     setBusy(true);
@@ -68,6 +76,56 @@ export default function OverviewPage() {
       setTimeout(() => setCopied(""), 1500);
     } catch {
       /* ignore */
+    }
+  }
+
+  async function deleteAction(id: string) {
+    setDeleting(id);
+    try {
+      const res = await fetch("/api/actions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        alert(data.error || "Delete failed");
+        return;
+      }
+      load();
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  async function clearDeletable() {
+    if (deletableCount === 0) return;
+    if (
+      !confirm(
+        `Remove ${deletableCount} dry-run / failed action(s) from history?\nExecuted transactions are kept.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting("bulk");
+    try {
+      const res = await fetch("/api/actions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clear: "deletable" }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        alert(data.error || "Clear failed");
+        return;
+      }
+      load();
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -99,11 +157,23 @@ export default function OverviewPage() {
           </button>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-4">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {[
             ["Dry run", status?.dryRun === false ? "LIVE" : "ON"],
             ["Active rules", status?.counts?.active ?? "—"],
             ["Actions", status?.counts?.actions ?? "—"],
+            [
+              "Today / cap",
+              status?.limits
+                ? `${status?.usage?.actionsToday ?? 0}/${status.limits.maxTxPerDay}`
+                : "—",
+            ],
+            [
+              "Max $/tx",
+              status?.limits?.maxTxUsd != null
+                ? `$${status.limits.maxTxUsd}`
+                : "—",
+            ],
             [
               "Worker",
               status?.worker?.lastTickAt
@@ -135,23 +205,36 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <div className="glass p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-[#c8ff4a]">
-            Activity history
-          </h3>
-          <p className="text-[10px] text-white/35">
-            Tx hash + explorer link when status is executed
-          </p>
+      <div className="glass flex max-h-[min(52vh,420px)] flex-col overflow-hidden p-5">
+        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-[#c8ff4a]">
+              Activity history
+            </h3>
+            <p className="mt-0.5 text-[10px] text-white/35">
+              Scrollable · delete only dry-run / failed · executed kept
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={deletableCount === 0 || deleting != null}
+            onClick={() => void clearDeletable()}
+            className="rounded-lg border border-white/15 bg-black/30 px-2.5 py-1 text-[10px] font-medium text-white/55 transition hover:border-rose-400/40 hover:bg-rose-500/10 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Remove all dry_run and error entries (executed txs stay)"
+          >
+            {deleting === "bulk"
+              ? "Clearing…"
+              : `Clear dry-run & failed${deletableCount ? ` (${deletableCount})` : ""}`}
+          </button>
         </div>
-        <ul className="space-y-2">
-          {(status?.actions || []).length === 0 && (
+        <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+          {actions.length === 0 && (
             <li className="text-sm text-white/40">
               No actions yet — start the worker and create a scheduled send /
               swap.
             </li>
           )}
-          {((status?.actions || []) as ActionRow[]).map((a) => {
+          {actions.map((a) => {
             const hasTx =
               Boolean(a.txHash) &&
               a.txHash!.startsWith("0x") &&
@@ -159,6 +242,7 @@ export default function OverviewPage() {
             const explorer = hasTx
               ? explorerTxUrl(a.chainId, a.txHash!)
               : null;
+            const canDelete = DELETABLE_STATUSES.has(a.status);
             return (
               <li
                 key={a.id}
@@ -174,13 +258,26 @@ export default function OverviewPage() {
                         : ""}
                     </p>
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                      STATUS_CLS[a.status] || "bg-white/10 text-white/50"
-                    }`}
-                  >
-                    {a.status}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                        STATUS_CLS[a.status] || "bg-white/10 text-white/50"
+                      }`}
+                    >
+                      {a.status}
+                    </span>
+                    {canDelete && (
+                      <button
+                        type="button"
+                        disabled={deleting != null}
+                        onClick={() => void deleteAction(a.id)}
+                        className="rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-white/40 hover:border-rose-400/40 hover:bg-rose-500/10 hover:text-rose-200 disabled:opacity-40"
+                        title="Delete this dry-run or failed entry"
+                      >
+                        {deleting === a.id ? "…" : "Delete"}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Transaction hash — verify on explorer */}

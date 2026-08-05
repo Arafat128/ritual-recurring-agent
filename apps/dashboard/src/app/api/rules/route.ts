@@ -6,20 +6,20 @@ import {
   RITUAL_CHAIN_ID,
   SEPOLIA_ID,
 } from "@rra/core";
-import { ensureEnv } from "@/lib/server";
+import { ensureDb } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 
 const ALLOWED = new Set([RITUAL_CHAIN_ID, SEPOLIA_ID, BASE_MAINNET_ID]);
 
 export async function GET() {
-  ensureEnv();
+  await ensureDb();
   const rules = await prisma.rule.findMany({ orderBy: { createdAt: "desc" } });
   return Response.json(rules);
 }
 
 export async function POST(req: Request) {
-  ensureEnv();
+  await ensureDb();
   const body = (await req.json()) as Record<string, unknown>;
   const type = String(body.type || "");
   const action = String(body.action || "");

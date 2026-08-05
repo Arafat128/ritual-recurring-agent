@@ -1,27 +1,50 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+
+type Limits = {
+  maxTxUsd: number;
+  maxTxPerDay: number;
+  loopIntervalMs: number;
+};
 
 export default function SettingsPage() {
   const [status, setStatus] = useState<any>(null);
-  const [config, setConfig] = useState<any>(null);
   const [dryRun, setDryRun] = useState(true);
+  const [maxTxUsd, setMaxTxUsd] = useState("25");
+  const [maxTxPerDay, setMaxTxPerDay] = useState("20");
+  const [loopSec, setLoopSec] = useState("30");
+  const [usageToday, setUsageToday] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [savingLimits, setSavingLimits] = useState(false);
   const [msg, setMsg] = useState("");
+  const [limitsMsg, setLimitsMsg] = useState("");
+
+  const applyLimits = useCallback((limits: Limits) => {
+    setMaxTxUsd(String(limits.maxTxUsd));
+    setMaxTxPerDay(String(limits.maxTxPerDay));
+    setLoopSec(String(Math.round(limits.loopIntervalMs / 1000)));
+  }, []);
 
   const load = useCallback(() => {
-    fetch("/api/status")
+    fetch("/api/settings")
       .then((r) => r.json())
       .then((s) => {
         setStatus(s);
         setDryRun(Boolean(s.dryRun));
+        if (s.limits) applyLimits(s.limits as Limits);
+        if (s.usage?.actionsToday != null) setUsageToday(s.usage.actionsToday);
       })
       .catch(() => {});
-    fetch("/api/config")
+    fetch("/api/status")
       .then((r) => r.json())
-      .then(setConfig)
+      .then((s) => {
+        setStatus((prev: any) => ({ ...prev, agentEvm: s.agentEvm, ...s }));
+        if (s.limits) applyLimits(s.limits as Limits);
+        if (s.usage?.actionsToday != null) setUsageToday(s.usage.actionsToday);
+      })
       .catch(() => {});
-  }, []);
+  }, [applyLimits]);
 
   useEffect(() => {
     load();
@@ -43,7 +66,7 @@ export default function SettingsPage() {
       setMsg(
         next
           ? "Dry run ON — worker will log txs only (safe)."
-          : "Dry run OFF — worker can send LIVE transactions. Fund the agent carefully."
+          : "Dry run OFF — worker can send LIVE transactions. Fund the agent carefully.",
       );
       load();
     } catch (e) {
@@ -53,12 +76,57 @@ export default function SettingsPage() {
     }
   }
 
+  async function saveLimits(e: FormEvent) {
+    e.preventDefault();
+    setSavingLimits(true);
+    setLimitsMsg("");
+    try {
+      const usd = Number(maxTxUsd);
+      const day = Math.floor(Number(maxTxPerDay));
+      const sec = Math.floor(Number(loopSec));
+      if (!Number.isFinite(usd) || usd < 0.01) {
+        throw new Error("Max $/tx must be at least 0.01");
+      }
+      if (!Number.isFinite(day) || day < 1) {
+        throw new Error("Max tx/day must be at least 1");
+      }
+      if (!Number.isFinite(sec) || sec < 10 || sec > 600) {
+        throw new Error("Worker interval must be 10–600 seconds");
+      }
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxTxUsd: usd,
+          maxTxPerDay: day,
+          loopIntervalSec: sec,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "save failed");
+      if (data.limits) applyLimits(data.limits as Limits);
+      setLimitsMsg(
+        "Saved. Limits apply on the next worker tick; loop interval updates after the current wait.",
+      );
+      load();
+    } catch (err) {
+      setLimitsMsg(err instanceof Error ? err.message : "error");
+    } finally {
+      setSavingLimits(false);
+    }
+  }
+
+  const dayCap = Number(maxTxPerDay) || 0;
+  const usagePct =
+    dayCap > 0 ? Math.min(100, Math.round((usageToday / dayCap) * 100)) : 0;
+
   return (
     <div className="space-y-4">
       <div className="glass p-6">
         <h2 className="text-lg font-semibold text-[#c8ff4a]">Settings</h2>
         <p className="mt-1 text-sm text-white/45">
-          Safety controls for Ritual Recurring Agent.
+          Safety controls for Ritual Recurring Agent. Limits are stored in
+          SQLite and re-read by the worker each tick — no restart required.
         </p>
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/35 p-4">
@@ -66,8 +134,8 @@ export default function SettingsPage() {
             <div className="text-sm font-semibold text-white/90">Dry run</div>
             <p className="mt-1 max-w-md text-[12px] text-white/45">
               When ON, the worker never broadcasts — it only logs would-be
-              sends/swaps/bridges (like DeFi Autopilot). Toggle anytime; takes
-              effect on the next worker tick.
+              sends/swaps/bridges. Toggle anytime; takes effect on the next
+              worker tick.
             </p>
           </div>
           <button
@@ -115,25 +183,141 @@ export default function SettingsPage() {
               {status?.agentEvm || "start worker once to register"}
             </dd>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-            <dt className="text-[10px] uppercase text-white/40">Max $/tx</dt>
-            <dd className="mt-1 font-mono">{config?.limits?.maxTxUsd ?? "—"}</dd>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-            <dt className="text-[10px] uppercase text-white/40">Max tx/day</dt>
-            <dd className="mt-1 font-mono">
-              {config?.limits?.maxTxPerDay ?? "—"}
-            </dd>
-          </div>
         </dl>
+      </div>
+
+      {/* Editable app limits */}
+      <div className="glass p-6">
+        <h3 className="text-sm font-semibold text-cyan-200">App limits</h3>
+        <p className="mt-1 text-[12px] text-white/45">
+          Cap how much the agent can do. These override{" "}
+          <code className="text-white/60">MAX_TX_USD</code> /{" "}
+          <code className="text-white/60">MAX_TX_PER_DAY</code> from{" "}
+          <code className="text-white/60">.env</code> once saved.
+        </p>
+
+        {/* Today usage */}
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <span className="text-white/50">
+              Usage today (UTC) — dry_run + executed count toward the cap
+            </span>
+            <span className="font-mono text-white/85">
+              {usageToday} / {maxTxPerDay || "—"} txs
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+            <div
+              className={`h-full rounded-full transition-all ${
+                usagePct >= 90
+                  ? "bg-rose-400"
+                  : usagePct >= 60
+                    ? "bg-amber-400"
+                    : "bg-[#c8ff4a]"
+              }`}
+              style={{ width: `${usagePct}%` }}
+            />
+          </div>
+        </div>
+
+        <form onSubmit={(e) => void saveLimits(e)} className="mt-4 space-y-4">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-white/40">
+                Max USD per tx
+              </span>
+              <input
+                type="number"
+                min={0.01}
+                max={1_000_000}
+                step="0.01"
+                value={maxTxUsd}
+                onChange={(e) => setMaxTxUsd(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50"
+              />
+              <span className="mt-1 block text-[10px] text-white/35">
+                Skip if estimated $ value exceeds this
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-white/40">
+                Max transactions / day
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={10_000}
+                step={1}
+                value={maxTxPerDay}
+                onChange={(e) => setMaxTxPerDay(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50"
+              />
+              <span className="mt-1 block text-[10px] text-white/35">
+                UTC day cap (dry_run + executed)
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-white/40">
+                Worker interval (seconds)
+              </span>
+              <input
+                type="number"
+                min={10}
+                max={600}
+                step={1}
+                value={loopSec}
+                onChange={(e) => setLoopSec(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50"
+              />
+              <span className="mt-1 block text-[10px] text-white/35">
+                How often the agent checks rules (10–600s)
+              </span>
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={savingLimits}
+              className="btn-primary disabled:opacity-50"
+            >
+              {savingLimits ? "Saving…" : "Save limits"}
+            </button>
+            <button
+              type="button"
+              disabled={savingLimits}
+              onClick={() => {
+                setMaxTxUsd("25");
+                setMaxTxPerDay("20");
+                setLoopSec("30");
+              }}
+              className="btn-ghost text-[12px]"
+            >
+              Reset fields to defaults
+            </button>
+          </div>
+          {limitsMsg && (
+            <p
+              className={`text-sm ${
+                limitsMsg.startsWith("Saved")
+                  ? "text-emerald-200/90"
+                  : "text-rose-300/90"
+              }`}
+            >
+              {limitsMsg}
+            </p>
+          )}
+        </form>
       </div>
 
       <div className="glass p-6 text-sm text-white/55">
         <h3 className="font-semibold text-cyan-200">Chains</h3>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-[13px]">
           <li>
-            <b className="text-white/80">Ritual (1979)</b> — recurring schedules,
-            RITUAL sends, ritual_ping.
+            <b className="text-white/80">Ritual (1979)</b> — recurring
+            schedules, RITUAL sends, ritual_ping.
           </li>
           <li>
             <b className="text-white/80">Sepolia (11155111)</b> — agent testnet
