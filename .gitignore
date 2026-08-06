@@ -14,3 +14,6 @@ tsconfig.tsbuildinfo
 
 .vercel
 .env*
+
+cron.secret.tmp
+.env.vercel*

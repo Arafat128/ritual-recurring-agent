@@ -176,9 +176,15 @@ export default function OverviewPage() {
             ],
             [
               "Worker",
-              status?.worker?.lastTickAt
-                ? new Date(status.worker.lastTickAt).toLocaleTimeString()
-                : "offline?",
+              status?.worker?.online
+                ? `online · ${
+                    status?.worker?.lastTickAt
+                      ? new Date(status.worker.lastTickAt).toLocaleTimeString()
+                      : "…"
+                  }`
+                : status?.worker?.lastTickAt
+                  ? `stale · ${new Date(status.worker.lastTickAt).toLocaleTimeString()}`
+                  : "offline",
             ],
           ].map(([k, v]) => (
             <div
@@ -186,13 +192,32 @@ export default function OverviewPage() {
               className="rounded-xl border border-white/10 bg-black/30 p-3"
             >
               <div className="text-[10px] uppercase text-white/40">{k}</div>
-              <div className="mt-1 font-mono text-sm text-white/90">{v}</div>
+              <div
+                className={`mt-1 font-mono text-sm ${
+                  k === "Worker"
+                    ? status?.worker?.online
+                      ? "text-emerald-300"
+                      : "text-amber-200"
+                    : "text-white/90"
+                }`}
+              >
+                {v}
+              </div>
             </div>
           ))}
         </div>
         {status?.agentEvm && (
           <p className="mt-3 font-mono text-[11px] text-white/40">
             Agent EOA: {status.agentEvm}
+            {status?.worker?.host ? ` · host: ${status.worker.host}` : ""}
+          </p>
+        )}
+        {!status?.worker?.online && (
+          <p className="mt-2 text-[11px] text-amber-200/80">
+            Worker offline — on Vercel the cron tick runs every minute (
+            <code className="text-white/50">/api/cron/worker</code>
+            ). Locally run <code className="text-white/50">npm run worker</code>
+            .
           </p>
         )}
         <div className="mt-4 flex flex-wrap gap-2">

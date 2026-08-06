@@ -7,3 +7,7 @@ export * from "./limits.js";
 export * from "./executeAction.js";
 export * from "./routing/uniswap.js";
 export * from "./routing/lifi.js";
+export * from "./worker/processRules.js";
+export * from "./worker/prices.js";
+export * from "./worker/notify.js";
+export * from "./worker/tick.js";

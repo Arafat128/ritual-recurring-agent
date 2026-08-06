@@ -39,12 +39,18 @@ export function isDryRun(): boolean {
   return isDryRunEnv();
 }
 
-export function agentPrivateKey(): `0x${string}` {
+export function tryAgentPrivateKey(): `0x${string}` | null {
   const k = process.env.AGENT_PRIVATE_KEY;
-  if (!k || !/^0x[0-9a-fA-F]{64}$/.test(k)) {
+  if (!k || !/^0x[0-9a-fA-F]{64}$/.test(k)) return null;
+  return k as `0x${string}`;
+}
+
+export function agentPrivateKey(): `0x${string}` {
+  const k = tryAgentPrivateKey();
+  if (!k) {
     throw new Error(
       "AGENT_PRIVATE_KEY missing or invalid (need 0x + 64 hex chars)"
     );
   }
-  return k as `0x${string}`;
+  return k;
 }

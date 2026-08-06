@@ -6,12 +6,11 @@ import {
   setSetting,
   WORKER,
   agentPrivateKey,
-  prisma,
   getAppLimits,
+  runWorkerTick,
+  notify,
 } from "@rra/core";
 import { privateKeyToAccount } from "viem/accounts";
-import { processRules } from "./rules.js";
-import { notify } from "./notify.js";
 
 const root = loadEnv();
 const PID_FILE = path.join(root, "data", "agent.pid");
@@ -47,14 +46,6 @@ async function main() {
     `[worker] limits maxTxUsd=$${limits.maxTxUsd} maxTxPerDay=${limits.maxTxPerDay} loop=${limits.loopIntervalMs}ms`
   );
 
-  await prisma.user.upsert({
-    where: { evmAddress: account.address.toLowerCase() },
-    create: {
-      evmAddress: account.address.toLowerCase(),
-      label: "ritual-agent",
-    },
-    update: {},
-  });
   await setSetting("agent.evm", account.address);
   await setSetting("worker.dryRun", String(isDryRun()));
   await setSetting("worker.startedAt", new Date().toISOString());
@@ -73,8 +64,7 @@ async function main() {
     if (running) return;
     running = true;
     try {
-      await processRules(account.address);
-      await setSetting("worker.lastTickAt", new Date().toISOString());
+      await runWorkerTick();
       if (tick % 10 === 0) {
         const L = await getAppLimits();
         console.log(

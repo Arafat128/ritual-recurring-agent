@@ -3,5 +3,11 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "buildCommand": "npm run db:generate && npm run build -w packages/core && npm run build -w apps/dashboard",
-  "outputDirectory": "apps/dashboard/.next"
+  "outputDirectory": "apps/dashboard/.next",
+  "crons": [
+    {
+      "path": "/api/cron/worker",
+      "schedule": "* * * * *"
+    }
+  ]
 }
