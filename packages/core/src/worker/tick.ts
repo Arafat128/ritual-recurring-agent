@@ -1,7 +1,6 @@
 import { privateKeyToAccount } from "viem/accounts";
 import { prisma, setSetting } from "../db.js";
-import { tryAgentPrivateKey, isDryRunEnv } from "../env.js";
-import { getDryRun } from "../dryRun.js";
+import { tryAgentPrivateKey } from "../env.js";
 import { getAppLimits } from "../limits.js";
 import { processRules } from "./processRules.js";
 import { notify } from "./notify.js";
@@ -10,7 +9,6 @@ export type WorkerTickResult = {
   ok: boolean;
   at: string;
   agentEvm: string | null;
-  dryRun: boolean;
   mode: "full" | "heartbeat-only";
   error?: string;
   rulesProcessed?: boolean;
@@ -18,14 +16,13 @@ export type WorkerTickResult = {
 
 /**
  * One worker cycle: optional rule processing + heartbeat.
- * Safe on Vercel Cron (serverless) and local long-running worker.
+ * Always live execution (no dry-run). Requires AGENT_PRIVATE_KEY for sends.
  */
 export async function runWorkerTick(opts?: {
   /** When true, skip rule execution and only write heartbeat */
   heartbeatOnly?: boolean;
 }): Promise<WorkerTickResult> {
   const at = new Date().toISOString();
-  const dryRun = await getDryRun();
 
   let key = tryAgentPrivateKey();
   let agentEvm: string | null = key
@@ -51,7 +48,13 @@ export async function runWorkerTick(opts?: {
     }
   }
 
-  await setSetting("worker.dryRun", String(dryRun));
+  // Clear legacy dry-run flag if present
+  try {
+    await setSetting("worker.dryRun", "false");
+  } catch {
+    /* */
+  }
+
   const started = await prisma.setting
     .findUnique({ where: { key: "worker.startedAt" } })
     .then((r) => r?.value)
@@ -76,19 +79,15 @@ export async function runWorkerTick(opts?: {
         ok: false,
         at,
         agentEvm,
-        dryRun,
         mode,
         error: msg,
         rulesProcessed: false,
       };
     }
   } else if (!key) {
-    // No signing key — still heartbeat so UI shows worker online on Vercel
-    if (!isDryRunEnv() && !dryRun) {
-      console.warn(
-        "[worker-tick] AGENT_PRIVATE_KEY missing; heartbeat only (set key for rule execution)",
-      );
-    }
+    console.warn(
+      "[worker-tick] AGENT_PRIVATE_KEY missing; heartbeat only (set a funded burner key for live txs)",
+    );
   }
 
   await setSetting("worker.lastTickAt", at);
@@ -96,16 +95,14 @@ export async function runWorkerTick(opts?: {
     ok: true,
     at,
     agentEvm,
-    dryRun,
     mode,
     rulesProcessed,
   };
 }
 
 export async function runWorkerStartupNotify(agentEvm: string | null) {
-  const dry = await getDryRun();
   const limits = await getAppLimits();
   await notify(
-    `Ritual Recurring Agent tick host online (${dry ? "DRY RUN" : "LIVE"}) ${agentEvm ?? "no-key"} · max $${limits.maxTxUsd}/tx · ${limits.maxTxPerDay}/day`,
+    `Ritual Recurring Agent LIVE ${agentEvm ?? "no-key"} · max $${limits.maxTxUsd}/tx · ${limits.maxTxPerDay}/day`,
   );
 }

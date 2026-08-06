@@ -1,4 +1,4 @@
-import { prisma, getSetting, getDryRun, getAppLimits } from "@rra/core";
+import { prisma, getSetting, getAppLimits } from "@rra/core";
 import { ensureDb } from "@/lib/server";
 import { ensureWorkerTick } from "@/lib/ensureWorkerTick";
 import { readWorkerCache, workerIsOnline } from "@/lib/workerCache";
@@ -31,7 +31,6 @@ export async function GET() {
     agentDb,
     lastTickDb,
     startedDb,
-    dryRun,
     limits,
     actionsToday,
     host,
@@ -42,11 +41,10 @@ export async function GET() {
     getSetting("agent.evm"),
     getSetting("worker.lastTickAt"),
     getSetting("worker.startedAt"),
-    getDryRun(),
     getAppLimits(),
     prisma.action.count({
       where: {
-        status: { in: ["executed", "dry_run"] },
+        status: "executed",
         createdAt: { gte: since },
       },
     }),
@@ -73,7 +71,7 @@ export async function GET() {
   const active = rules.filter((r) => r.status === "active").length;
 
   return Response.json({
-    dryRun,
+    live: true,
     agentEvm: agent,
     worker: {
       lastTickAt: lastTick,

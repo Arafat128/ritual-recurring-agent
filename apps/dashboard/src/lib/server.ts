@@ -44,9 +44,6 @@ export function ensureEnv() {
     process.env.DATABASE_URL = "file:/tmp/ritual-agent.db";
   }
 
-  if (process.env.DRY_RUN === undefined) {
-    process.env.DRY_RUN = "true";
-  }
 }
 
 let dbReady: Promise<void> | null = null;

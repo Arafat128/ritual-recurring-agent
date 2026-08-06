@@ -28,17 +28,6 @@ export function loadEnv(): string {
   return root;
 }
 
-/** Env default only — prefer getDryRun() which reads DB toggle. */
-export function isDryRunEnv(): boolean {
-  const v = (process.env.DRY_RUN ?? "true").toLowerCase();
-  return v !== "false" && v !== "0";
-}
-
-/** @deprecated use getDryRun from dryRun.ts for UI toggle */
-export function isDryRun(): boolean {
-  return isDryRunEnv();
-}
-
 export function tryAgentPrivateKey(): `0x${string}` | null {
   const k = process.env.AGENT_PRIVATE_KEY;
   if (!k || !/^0x[0-9a-fA-F]{64}$/.test(k)) return null;

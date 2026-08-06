@@ -10,14 +10,11 @@ type Limits = {
 
 export default function SettingsPage() {
   const [status, setStatus] = useState<any>(null);
-  const [dryRun, setDryRun] = useState(true);
   const [maxTxUsd, setMaxTxUsd] = useState("25");
   const [maxTxPerDay, setMaxTxPerDay] = useState("20");
   const [loopSec, setLoopSec] = useState("30");
   const [usageToday, setUsageToday] = useState(0);
-  const [busy, setBusy] = useState(false);
   const [savingLimits, setSavingLimits] = useState(false);
-  const [msg, setMsg] = useState("");
   const [limitsMsg, setLimitsMsg] = useState("");
 
   const applyLimits = useCallback((limits: Limits) => {
@@ -31,7 +28,6 @@ export default function SettingsPage() {
       .then((r) => r.json())
       .then((s) => {
         setStatus(s);
-        setDryRun(Boolean(s.dryRun));
         if (s.limits) applyLimits(s.limits as Limits);
         if (s.usage?.actionsToday != null) setUsageToday(s.usage.actionsToday);
       })
@@ -49,32 +45,6 @@ export default function SettingsPage() {
   useEffect(() => {
     load();
   }, [load]);
-
-  async function toggleDryRun() {
-    setBusy(true);
-    setMsg("");
-    try {
-      const next = !dryRun;
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dryRun: next }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "failed");
-      setDryRun(next);
-      setMsg(
-        next
-          ? "Dry run ON — worker will log txs only (safe)."
-          : "Dry run OFF — worker can send LIVE transactions. Fund the agent carefully.",
-      );
-      load();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : "error");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function saveLimits(e: FormEvent) {
     e.preventDefault();
@@ -125,68 +95,36 @@ export default function SettingsPage() {
       <div className="glass p-6">
         <h2 className="text-lg font-semibold text-[#c8ff4a]">Settings</h2>
         <p className="mt-1 text-sm text-white/45">
-          Safety controls for Ritual Recurring Agent. Limits are stored in
-          SQLite and re-read by the worker each tick — no restart required.
+          Safety limits for Ritual Recurring Agent. Stored in SQLite and
+          re-read by the worker each tick — no restart required.
         </p>
 
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/35 p-4">
-          <div>
-            <div className="text-sm font-semibold text-white/90">Dry run</div>
-            <p className="mt-1 max-w-md text-[12px] text-white/45">
-              When ON, the worker never broadcasts — it only logs would-be
-              sends/swaps/bridges. Toggle anytime; takes effect on the next
-              worker tick.
-            </p>
+        <div className="mt-6 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4">
+          <div className="text-sm font-semibold text-rose-100">
+            LIVE execution
           </div>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void toggleDryRun()}
-            className={`relative h-10 w-20 shrink-0 rounded-full transition ${
-              dryRun
-                ? "bg-emerald-500/30 ring-1 ring-emerald-400/50"
-                : "bg-rose-500/25 ring-1 ring-rose-400/40"
-            }`}
-            title="Toggle dry run"
-          >
-            <span
-              className={`absolute top-1 flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold transition ${
-                dryRun
-                  ? "left-1 bg-emerald-300 text-black"
-                  : "left-11 bg-rose-300 text-black"
-              }`}
-            >
-              {dryRun ? "ON" : "OFF"}
-            </span>
-          </button>
-        </div>
-        {msg && (
-          <p
-            className={`mt-3 text-sm ${
-              dryRun ? "text-emerald-200/90" : "text-amber-200/90"
-            }`}
-          >
-            {msg}
+          <p className="mt-1 max-w-xl text-[12px] text-white/55">
+            Dry run is removed. The worker broadcasts real transactions when
+            rules fire. Use a funded burner key on Ritual testnet for sends.
+            Keep <code className="text-white/70">maxTxUsd</code> /{" "}
+            <code className="text-white/70">maxTxPerDay</code> low while testing.
           </p>
-        )}
+        </div>
 
         <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-xl border border-white/10 bg-black/30 p-3">
             <dt className="text-[10px] uppercase text-white/40">Mode</dt>
-            <dd className="mt-1 font-mono text-white/90">
-              {dryRun ? "DRY RUN" : "LIVE"}
-            </dd>
+            <dd className="mt-1 font-mono text-rose-200">LIVE</dd>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/30 p-3">
             <dt className="text-[10px] uppercase text-white/40">Agent EOA</dt>
             <dd className="mt-1 break-all font-mono text-[11px] text-white/80">
-              {status?.agentEvm || "start worker once to register"}
+              {status?.agentEvm || "set AGENT_PRIVATE_KEY and start worker"}
             </dd>
           </div>
         </dl>
       </div>
 
-      {/* Editable app limits */}
       <div className="glass p-6">
         <h3 className="text-sm font-semibold text-cyan-200">App limits</h3>
         <p className="mt-1 text-[12px] text-white/45">
@@ -196,11 +134,10 @@ export default function SettingsPage() {
           <code className="text-white/60">.env</code> once saved.
         </p>
 
-        {/* Today usage */}
         <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
             <span className="text-white/50">
-              Usage today (UTC) — dry_run + executed count toward the cap
+              Usage today (UTC) — executed txs toward the cap
             </span>
             <span className="font-mono text-white/85">
               {usageToday} / {maxTxPerDay || "—"} txs
@@ -254,7 +191,7 @@ export default function SettingsPage() {
                 className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50"
               />
               <span className="mt-1 block text-[10px] text-white/35">
-                UTC day cap (dry_run + executed)
+                UTC day cap (executed only)
               </span>
             </label>
 

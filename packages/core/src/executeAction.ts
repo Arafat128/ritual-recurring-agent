@@ -17,7 +17,6 @@ import {
 } from "./config.js";
 import { prisma } from "./db.js";
 import { agentPrivateKey } from "./env.js";
-import { getDryRun } from "./dryRun.js";
 import { getAppLimits } from "./limits.js";
 import type { ExecResult, TxRequest } from "./types.js";
 
@@ -52,7 +51,7 @@ async function checkAppLimits(tx: TxRequest): Promise<string | null> {
   const since = startOfUtcDay();
   const count = await prisma.action.count({
     where: {
-      status: { in: ["executed", "dry_run"] },
+      status: "executed",
       createdAt: { gte: since },
     },
   });
@@ -105,15 +104,6 @@ export async function executeAction(tx: TxRequest): Promise<ExecResult> {
   ]
     .filter(Boolean)
     .join(" ");
-
-  if (await getDryRun()) {
-    await prisma.action.update({
-      where: { id: action.id },
-      data: { status: "dry_run", command: cmd },
-    });
-    console.log(`[executeAction] DRY_RUN ${cmd} — ${tx.summary}`);
-    return { status: "dry_run", actionId: action.id };
-  }
 
   try {
     await prisma.action.update({

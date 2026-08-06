@@ -1,12 +1,4 @@
-import {
-  getDryRun,
-  setDryRun,
-  getSetting,
-  isDryRunEnv,
-  getAppLimits,
-  setAppLimits,
-  prisma,
-} from "@rra/core";
+import { getSetting, getAppLimits, setAppLimits, prisma } from "@rra/core";
 import { ensureDb } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -20,21 +12,19 @@ function startOfUtcDay(): Date {
 
 export async function GET() {
   await ensureDb();
-  const [dryRun, agent, limits] = await Promise.all([
-    getDryRun(),
+  const [agent, limits] = await Promise.all([
     getSetting("agent.evm"),
     getAppLimits(),
   ]);
   const since = startOfUtcDay();
   const actionsToday = await prisma.action.count({
     where: {
-      status: { in: ["executed", "dry_run"] },
+      status: "executed",
       createdAt: { gte: since },
     },
   });
   return Response.json({
-    dryRun,
-    dryRunEnvDefault: isDryRunEnv(),
+    live: true,
     agentEvm: agent,
     limits,
     usage: {
@@ -45,7 +35,6 @@ export async function GET() {
 }
 
 type PatchBody = {
-  dryRun?: boolean;
   maxTxUsd?: number;
   maxTxPerDay?: number;
   /** Seconds in UI; stored as ms */
@@ -62,60 +51,44 @@ export async function PATCH(req: Request) {
     return Response.json({ error: "JSON body required" }, { status: 400 });
   }
 
-  const hasDry = typeof body.dryRun === "boolean";
   const hasLimits =
     body.maxTxUsd !== undefined ||
     body.maxTxPerDay !== undefined ||
     body.loopIntervalSec !== undefined ||
     body.loopIntervalMs !== undefined;
 
-  if (!hasDry && !hasLimits) {
+  if (!hasLimits) {
     return Response.json(
       {
         error:
-          "Provide dryRun and/or limits (maxTxUsd, maxTxPerDay, loopIntervalSec)",
+          "Provide limits (maxTxUsd, maxTxPerDay, and/or loopIntervalSec)",
       },
       { status: 400 },
     );
   }
 
-  const out: Record<string, unknown> = { ok: true };
-
-  if (hasDry) {
-    await setDryRun(body.dryRun!);
-    out.dryRun = body.dryRun;
+  const patch: {
+    maxTxUsd?: number;
+    maxTxPerDay?: number;
+    loopIntervalMs?: number;
+  } = {};
+  if (body.maxTxUsd !== undefined) patch.maxTxUsd = Number(body.maxTxUsd);
+  if (body.maxTxPerDay !== undefined) {
+    patch.maxTxPerDay = Math.floor(Number(body.maxTxPerDay));
+  }
+  if (body.loopIntervalMs !== undefined) {
+    patch.loopIntervalMs = Math.floor(Number(body.loopIntervalMs));
+  } else if (body.loopIntervalSec !== undefined) {
+    patch.loopIntervalMs = Math.floor(Number(body.loopIntervalSec) * 1000);
   }
 
-  if (hasLimits) {
-    const patch: {
-      maxTxUsd?: number;
-      maxTxPerDay?: number;
-      loopIntervalMs?: number;
-    } = {};
-    if (body.maxTxUsd !== undefined) patch.maxTxUsd = Number(body.maxTxUsd);
-    if (body.maxTxPerDay !== undefined) {
-      patch.maxTxPerDay = Math.floor(Number(body.maxTxPerDay));
-    }
-    if (body.loopIntervalMs !== undefined) {
-      patch.loopIntervalMs = Math.floor(Number(body.loopIntervalMs));
-    } else if (body.loopIntervalSec !== undefined) {
-      patch.loopIntervalMs = Math.floor(Number(body.loopIntervalSec) * 1000);
-    }
-    try {
-      out.limits = await setAppLimits(patch);
-    } catch (e) {
-      return Response.json(
-        { error: e instanceof Error ? e.message : "invalid limits" },
-        { status: 400 },
-      );
-    }
-  } else {
-    out.limits = await getAppLimits();
+  try {
+    const limits = await setAppLimits(patch);
+    return Response.json({ ok: true, live: true, limits });
+  } catch (e) {
+    return Response.json(
+      { error: e instanceof Error ? e.message : "invalid limits" },
+      { status: 400 },
+    );
   }
-
-  if (!hasDry) {
-    out.dryRun = await getDryRun();
-  }
-
-  return Response.json(out);
 }

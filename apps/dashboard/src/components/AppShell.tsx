@@ -106,8 +106,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
       {children}
       <footer className="mt-12 border-t border-white/10 pt-6 text-center text-[11px] text-white/30">
-        Dashboard never signs agent txs — the worker EOA executes rules. Default{" "}
-        <b className="text-white/50">DRY_RUN=true</b>.
+        Dashboard never signs agent txs — the worker EOA executes{" "}
+        <b className="text-white/50">live</b> rules on-chain. Fund a burner key
+        before enabling send rules.
       </footer>
     </div>
   );

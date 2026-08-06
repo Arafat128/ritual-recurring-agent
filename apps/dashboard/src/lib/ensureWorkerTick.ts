@@ -40,7 +40,6 @@ export async function ensureWorkerTick(opts?: {
         lastTickAt: result.at,
         startedAt: (await getSetting("worker.startedAt")) || result.at,
         agentEvm: result.agentEvm,
-        dryRun: result.dryRun,
         mode: result.mode,
       });
     } catch (e) {

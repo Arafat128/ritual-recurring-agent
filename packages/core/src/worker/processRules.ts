@@ -113,7 +113,7 @@ async function runRule(
         data: {
           ruleId: rule.id,
           type: "ritual_ping",
-          status: "dry_run",
+          status: "executed",
           chainId: rule.chainId || RITUAL_CHAIN_ID,
           summary: `${summaryBase} (audit tick)`,
           usdValue: 0,
@@ -293,8 +293,6 @@ async function runRule(
       const result = await executeAction(tx);
       if (result.status === "executed") {
         await notify(`Executed: ${tx.summary}\n${result.txHash}`);
-      } else if (result.status === "dry_run") {
-        console.log(`[rules] DRY_RUN ${tx.summary}`);
       } else if (result.status === "skipped") {
         await failRule(rule, result.error ?? "skipped");
         return;

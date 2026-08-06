@@ -7,7 +7,6 @@ export type CachedWorkerState = {
   lastTickAt: string;
   startedAt?: string | null;
   agentEvm?: string | null;
-  dryRun?: boolean;
   mode?: string;
 };
 

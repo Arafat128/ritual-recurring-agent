@@ -33,7 +33,6 @@ const DELETABLE_STATUSES = new Set(["dry_run", "error"]);
 
 export default function OverviewPage() {
   const [status, setStatus] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [copied, setCopied] = useState("");
 
@@ -54,20 +53,6 @@ export default function OverviewPage() {
   const deletableCount = actions.filter((a) =>
     DELETABLE_STATUSES.has(a.status),
   ).length;
-
-  async function toggleDry() {
-    setBusy(true);
-    try {
-      await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dryRun: !status?.dryRun }),
-      });
-      load();
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function copyHash(hash: string) {
     try {
@@ -104,7 +89,7 @@ export default function OverviewPage() {
     if (deletableCount === 0) return;
     if (
       !confirm(
-        `Remove ${deletableCount} dry-run / failed action(s) from history?\nExecuted transactions are kept.`,
+        `Remove ${deletableCount} failed / legacy action(s) from history?\nExecuted transactions are kept.`,
       )
     ) {
       return;
@@ -140,26 +125,16 @@ export default function OverviewPage() {
               <b className="text-white/70">send · swap · bridge</b> rules —
               Ritual-first, Sepolia for test swaps,{" "}
               <span className="text-cyan-300">Base mainnet</span> only for live
-              DeFi.
+              DeFi. All actions execute on-chain.
             </p>
           </div>
-          <button
-            type="button"
-            disabled={busy || status == null}
-            onClick={() => void toggleDry()}
-            className={`rounded-full px-4 py-2 text-xs font-bold uppercase tracking-wide transition ${
-              status?.dryRun
-                ? "border border-emerald-400/40 bg-emerald-500/15 text-emerald-200"
-                : "border border-rose-400/40 bg-rose-500/20 text-rose-100"
-            }`}
-          >
-            Dry run: {status?.dryRun === false ? "OFF · LIVE" : "ON"}
-          </button>
+          <span className="rounded-full border border-rose-400/40 bg-rose-500/20 px-4 py-2 text-xs font-bold uppercase tracking-wide text-rose-100">
+            LIVE · on-chain
+          </span>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {[
-            ["Dry run", status?.dryRun === false ? "LIVE" : "ON"],
             ["Active rules", status?.counts?.active ?? "—"],
             ["Actions", status?.counts?.actions ?? "—"],
             [
@@ -245,11 +220,11 @@ export default function OverviewPage() {
             disabled={deletableCount === 0 || deleting != null}
             onClick={() => void clearDeletable()}
             className="rounded-lg border border-white/15 bg-black/30 px-2.5 py-1 text-[10px] font-medium text-white/55 transition hover:border-rose-400/40 hover:bg-rose-500/10 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
-            title="Remove all dry_run and error entries (executed txs stay)"
+            title="Remove failed / legacy history rows (executed txs stay)"
           >
             {deleting === "bulk"
               ? "Clearing…"
-              : `Clear dry-run & failed${deletableCount ? ` (${deletableCount})` : ""}`}
+              : `Clear failed${deletableCount ? ` (${deletableCount})` : ""}`}
           </button>
         </div>
         <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
@@ -339,18 +314,6 @@ export default function OverviewPage() {
                         {a.txHash}
                       </code>
                     </details>
-                  </div>
-                )}
-
-                {/* Dry-run: show would-be command so user can still verify intent */}
-                {a.status === "dry_run" && a.command && (
-                  <div className="mt-2 rounded-lg border border-purple-400/20 bg-purple-950/25 px-2.5 py-1.5">
-                    <span className="text-[10px] uppercase tracking-wide text-purple-200/70">
-                      Would send (dry run — no hash)
-                    </span>
-                    <code className="mt-0.5 block break-all font-mono text-[10px] text-purple-100/75">
-                      {a.command}
-                    </code>
                   </div>
                 )}
 

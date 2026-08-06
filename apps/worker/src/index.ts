@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadEnv,
-  isDryRun,
   setSetting,
   WORKER,
   agentPrivateKey,
@@ -39,7 +38,7 @@ async function main() {
   const account = privateKeyToAccount(agentPrivateKey());
   const limits = await getAppLimits();
   console.log(
-    `[worker] Ritual Recurring Agent pid=${process.pid} DRY_RUN=${isDryRun()}`
+    `[worker] Ritual Recurring Agent LIVE pid=${process.pid}`
   );
   console.log(`[worker] agent EOA ${account.address}`);
   console.log(
@@ -47,7 +46,7 @@ async function main() {
   );
 
   await setSetting("agent.evm", account.address);
-  await setSetting("worker.dryRun", String(isDryRun()));
+  await setSetting("worker.dryRun", "false");
   await setSetting("worker.startedAt", new Date().toISOString());
 
   console.log(
@@ -55,7 +54,7 @@ async function main() {
   );
   await new Promise((r) => setTimeout(r, WORKER.startupCooldownMs));
   await notify(
-    `Ritual Recurring Agent started (${isDryRun() ? "DRY RUN" : "LIVE"}) ${account.address}`
+    `Ritual Recurring Agent started LIVE ${account.address}`
   );
 
   let running = false;
@@ -79,7 +78,6 @@ async function main() {
     }
   };
 
-  // Re-read loop interval from DB each cycle so Settings changes apply without restart
   const schedule = async () => {
     await loop();
     let ms = WORKER.loopIntervalMs;

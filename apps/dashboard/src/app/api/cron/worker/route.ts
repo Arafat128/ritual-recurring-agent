@@ -4,13 +4,12 @@ import { writeWorkerCache } from "@/lib/workerCache";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-/** Allow rule evaluation + dry-run path on cron */
+/** Allow rule evaluation + live tx path on cron */
 export const maxDuration = 60;
 
 /**
- * Vercel Cron entrypoint — runs one agent tick per minute.
+ * Vercel Cron entrypoint — runs one agent tick (Hobby: once daily).
  * Secured with CRON_SECRET (Authorization: Bearer …).
- * Also accepts manual trigger with same secret for debugging.
  */
 function authorize(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -55,18 +54,17 @@ export async function GET(req: Request) {
       lastTickAt: result.at,
       startedAt: (await getSetting("worker.startedAt")) || result.at,
       agentEvm: result.agentEvm,
-      dryRun: result.dryRun,
       mode: result.mode,
     });
 
     return Response.json({
       ok: result.ok,
+      live: true,
       worker: {
         online: true,
         lastTickAt: result.at,
         agentEvm: result.agentEvm,
         mode: result.mode,
-        dryRun: result.dryRun,
         host: "vercel-cron",
       },
       error: result.error ?? null,
