@@ -6,26 +6,38 @@
  *
  * Fix: after schema init, restore from Runtime Cache; after mutations / ticks,
  * persist rules + settings + recent actions back to the shared cache.
+ *
+ * Deletes use tombstones so a merge with an older snapshot cannot resurrect
+ * a rule the user already removed.
  */
 import { prisma } from "@rra/core";
 
 const CACHE_KEY = "rra:db:snapshot:v1";
 const TTL_SEC = 60 * 60 * 24 * 14; // 14 days
+const MAX_TOMBSTONES = 300;
 
 export type DbSnapshot = {
-  v: 1;
+  v: 1 | 2;
   at: string;
   settings: { key: string; value: string; updatedAt?: string }[];
   rules: Record<string, unknown>[];
   actions: Record<string, unknown>[];
+  /** Rule ids permanently removed — never rehydrate */
+  deletedRuleIds?: string[];
 };
 
 let lastPersistAt = 0;
 let restoreDone = false;
+/** In-process pending deletes (merged into next persist) */
+const pendingDeletedRules = new Set<string>();
 
 async function getRuntimeCache(): Promise<{
   get: (k: string) => Promise<unknown>;
-  set: (k: string, v: unknown, o?: { ttl?: number; tags?: string[] }) => Promise<void>;
+  set: (
+    k: string,
+    v: unknown,
+    o?: { ttl?: number; tags?: string[] }
+  ) => Promise<void>;
 } | null> {
   if (!process.env.VERCEL) return null;
   try {
@@ -43,6 +55,24 @@ function toDate(v: unknown): Date | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
+function mergeTombstones(
+  prev: string[] | undefined,
+  extra: Iterable<string>
+): string[] {
+  const set = new Set<string>([...(prev || []), ...extra]);
+  const arr = Array.from(set);
+  // Keep newest-ish by just capping length (ids are cuid, order not critical)
+  return arr.length > MAX_TOMBSTONES ? arr.slice(-MAX_TOMBSTONES) : arr;
+}
+
+/** Mark rule ids as deleted in shared state (call around local delete). */
+export function markRulesDeleted(ids: string | string[]) {
+  const list = Array.isArray(ids) ? ids : [ids];
+  for (const id of list) {
+    if (id) pendingDeletedRules.add(id);
+  }
+}
+
 /** Pull shared snapshot into local SQLite (merge by id / key). */
 export async function restoreDurableState(): Promise<{
   restored: boolean;
@@ -50,7 +80,6 @@ export async function restoreDurableState(): Promise<{
   actions: number;
   settings: number;
 }> {
-  // Local/dev uses real file DB — no hydrate needed
   if (!process.env.VERCEL) {
     return { restored: false, rules: 0, actions: 0, settings: 0 };
   }
@@ -69,9 +98,24 @@ export async function restoreDurableState(): Promise<{
   } catch (e) {
     console.warn("[durableState] cache get failed", e);
   }
-  if (!snap || snap.v !== 1) {
+  if (!snap || (snap.v !== 1 && snap.v !== 2)) {
     restoreDone = true;
     return { restored: false, rules: 0, actions: 0, settings: 0 };
+  }
+
+  const deleted = new Set(
+    mergeTombstones(snap.deletedRuleIds, pendingDeletedRules)
+  );
+
+  // Enforce tombstones locally (rule may exist only on this /tmp db)
+  if (deleted.size > 0) {
+    try {
+      await prisma.rule.deleteMany({
+        where: { id: { in: Array.from(deleted) } },
+      });
+    } catch {
+      /* */
+    }
   }
 
   let rulesN = 0;
@@ -94,7 +138,7 @@ export async function restoreDurableState(): Promise<{
 
   for (const r of snap.rules || []) {
     const id = String(r.id || "");
-    if (!id) continue;
+    if (!id || deleted.has(id)) continue;
     try {
       const data = {
         type: String(r.type),
@@ -158,10 +202,17 @@ export async function restoreDurableState(): Promise<{
     try {
       const existing = await prisma.action.findUnique({ where: { id } });
       if (existing) continue;
+      // Detach FK if parent rule was deleted
+      let ruleId = a.ruleId != null ? String(a.ruleId) : null;
+      if (ruleId && deleted.has(ruleId)) ruleId = null;
+      if (ruleId) {
+        const parent = await prisma.rule.findUnique({ where: { id: ruleId } });
+        if (!parent) ruleId = null;
+      }
       await prisma.action.create({
         data: {
           id,
-          ruleId: a.ruleId != null ? String(a.ruleId) : null,
+          ruleId,
           type: String(a.type),
           status: String(a.status || "pending"),
           chainId: Number(a.chainId),
@@ -182,7 +233,7 @@ export async function restoreDurableState(): Promise<{
 
   restoreDone = true;
   console.log(
-    `[durableState] restored rules=${rulesN} actions=${actionsN} settings=${settingsN} from=${snap.at}`,
+    `[durableState] restored rules=${rulesN} actions=${actionsN} settings=${settingsN} tombstones=${deleted.size} from=${snap.at}`,
   );
   return {
     restored: rulesN + actionsN + settingsN > 0,
@@ -193,13 +244,22 @@ export async function restoreDurableState(): Promise<{
 }
 
 /** Push local SQLite state to shared Runtime Cache. */
-export async function persistDurableState(): Promise<boolean> {
-  if (!process.env.VERCEL) return false;
+export async function persistDurableState(opts?: {
+  deletedRuleIds?: string[];
+}): Promise<boolean> {
+  if (opts?.deletedRuleIds?.length) {
+    markRulesDeleted(opts.deletedRuleIds);
+  }
 
-  // Debounce rapid writes within same instance
+  if (!process.env.VERCEL) {
+    // Local: still clear pending set after disk delete
+    pendingDeletedRules.clear();
+    return false;
+  }
+
   const now = Date.now();
-  if (now - lastPersistAt < 400) {
-    /* still allow — important after rule create */
+  if (now - lastPersistAt < 200) {
+    /* allow */
   }
   lastPersistAt = now;
 
@@ -213,7 +273,6 @@ export async function persistDurableState(): Promise<boolean> {
       prisma.action.findMany({ orderBy: { createdAt: "desc" }, take: 80 }),
     ]);
 
-    // Merge with existing snapshot so we don't drop rows only on other instances
     let prev: DbSnapshot | null = null;
     try {
       prev = (await cache.get(CACHE_KEY)) as DbSnapshot | null;
@@ -221,7 +280,16 @@ export async function persistDurableState(): Promise<boolean> {
       /* */
     }
 
-    const settingMap = new Map<string, { key: string; value: string; updatedAt?: string }>();
+    const deleted = mergeTombstones(
+      prev?.deletedRuleIds,
+      pendingDeletedRules
+    );
+    const deletedSet = new Set(deleted);
+
+    const settingMap = new Map<
+      string,
+      { key: string; value: string; updatedAt?: string }
+    >();
     for (const s of prev?.settings || []) {
       if (s?.key) settingMap.set(s.key, s);
     }
@@ -235,9 +303,12 @@ export async function persistDurableState(): Promise<boolean> {
 
     const ruleMap = new Map<string, Record<string, unknown>>();
     for (const r of prev?.rules || []) {
-      if (r?.id) ruleMap.set(String(r.id), r as Record<string, unknown>);
+      const id = r?.id ? String(r.id) : "";
+      if (!id || deletedSet.has(id)) continue;
+      ruleMap.set(id, r as Record<string, unknown>);
     }
     for (const r of rules) {
+      if (deletedSet.has(r.id)) continue;
       ruleMap.set(r.id, {
         ...r,
         nextRunAt: r.nextRunAt?.toISOString?.() ?? r.nextRunAt,
@@ -246,6 +317,8 @@ export async function persistDurableState(): Promise<boolean> {
         updatedAt: r.updatedAt?.toISOString?.() ?? r.updatedAt,
       });
     }
+    // Enforce tombstones after overlay
+    for (const id of deletedSet) ruleMap.delete(id);
 
     const actionMap = new Map<string, Record<string, unknown>>();
     for (const a of prev?.actions || []) {
@@ -254,30 +327,38 @@ export async function persistDurableState(): Promise<boolean> {
     for (const a of actions) {
       actionMap.set(a.id, {
         ...a,
+        // Detach deleted parents in snapshot
+        ruleId:
+          a.ruleId && deletedSet.has(a.ruleId) ? null : a.ruleId,
         createdAt: a.createdAt?.toISOString?.() ?? a.createdAt,
         updatedAt: a.updatedAt?.toISOString?.() ?? a.updatedAt,
       });
     }
 
-    // Cap actions to newest 80 by createdAt
-    const actionList = Array.from(actionMap.values()).sort((a, b) => {
-      const ta = new Date(String(a.createdAt || 0)).getTime();
-      const tb = new Date(String(b.createdAt || 0)).getTime();
-      return tb - ta;
-    }).slice(0, 80);
+    const actionList = Array.from(actionMap.values())
+      .sort((a, b) => {
+        const ta = new Date(String(a.createdAt || 0)).getTime();
+        const tb = new Date(String(b.createdAt || 0)).getTime();
+        return tb - ta;
+      })
+      .slice(0, 80);
 
     const snap: DbSnapshot = {
-      v: 1,
+      v: 2,
       at: new Date().toISOString(),
       settings: Array.from(settingMap.values()),
       rules: Array.from(ruleMap.values()),
       actions: actionList,
+      deletedRuleIds: deleted,
     };
 
     await cache.set(CACHE_KEY, snap, {
       ttl: TTL_SEC,
       tags: ["rra-db"],
     });
+
+    // Pending deletes are now in the shared tombstone list
+    pendingDeletedRules.clear();
     return true;
   } catch (e) {
     console.warn("[durableState] persist failed", e);

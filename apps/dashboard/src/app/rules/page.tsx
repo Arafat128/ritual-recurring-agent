@@ -178,17 +178,48 @@ export default function RulesPage() {
   }
 
   async function setStatus(id: string, status: string) {
-    await fetch(`/api/rules/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    load();
+    setErr("");
+    try {
+      const res = await fetch(`/api/rules/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Status update failed");
+      // Optimistic + reload
+      setRules((list) =>
+        list.map((r) => (r.id === id ? { ...r, status } : r)),
+      );
+      load();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Status update failed");
+    }
   }
 
   async function remove(id: string) {
-    await fetch(`/api/rules/${id}`, { method: "DELETE" });
-    load();
+    if (!confirm("Delete this rule? Activity history is kept.")) return;
+    setErr("");
+    setOk("");
+    // Optimistic remove so the row disappears immediately
+    const prev = rules;
+    setRules((list) => list.filter((r) => r.id !== id));
+    try {
+      const res = await fetch(`/api/rules/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRules(prev);
+        throw new Error(data.error || `Delete failed (${res.status})`);
+      }
+      setOk("Rule deleted");
+      // Confirm from server (durable snapshot applied)
+      load();
+    } catch (ex) {
+      setRules(prev);
+      setErr(ex instanceof Error ? ex.message : "Delete failed");
+    }
   }
 
   const preview =
@@ -465,7 +496,7 @@ export default function RulesPage() {
                   <button
                     type="button"
                     className="btn-ghost !px-2 !py-1 text-[10px]"
-                    onClick={() => setStatus(r.id, "paused")}
+                    onClick={() => void setStatus(r.id, "paused")}
                   >
                     Pause
                   </button>
@@ -473,7 +504,7 @@ export default function RulesPage() {
                   <button
                     type="button"
                     className="btn-ghost !px-2 !py-1 text-[10px]"
-                    onClick={() => setStatus(r.id, "active")}
+                    onClick={() => void setStatus(r.id, "active")}
                   >
                     Resume
                   </button>
@@ -481,7 +512,7 @@ export default function RulesPage() {
                 <button
                   type="button"
                   className="btn-ghost !px-2 !py-1 text-[10px] text-rose-200/80"
-                  onClick={() => remove(r.id)}
+                  onClick={() => void remove(r.id)}
                 >
                   Delete
                 </button>
