@@ -17,3 +17,6 @@ tsconfig.tsbuildinfo
 
 cron.secret.tmp
 .env.vercel*
+
+data/.burner-agent.key
+data/.burner-agent.meta.json

@@ -1,5 +1,6 @@
 import { prisma } from "@rra/core";
 import { ensureDb } from "@/lib/server";
+import { persistDurableState } from "@/lib/durableState";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export async function DELETE(req: Request) {
     const result = await prisma.action.deleteMany({
       where: { status: { in: [...DELETABLE] } },
     });
+    await persistDurableState();
     return Response.json({ ok: true, deleted: result.count });
   }
 
@@ -49,5 +51,6 @@ export async function DELETE(req: Request) {
   }
 
   await prisma.action.delete({ where: { id: body.id } });
+  await persistDurableState();
   return Response.json({ ok: true, deleted: 1, id: body.id });
 }

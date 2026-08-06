@@ -1,5 +1,6 @@
 import { prisma } from "@rra/core";
 import { ensureDb } from "@/lib/server";
+import { persistDurableState } from "@/lib/durableState";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export async function PATCH(
     where: { id: params.id },
     data: { status: body.status },
   });
+  await persistDurableState();
   return Response.json(rule);
 }
 
@@ -25,5 +27,6 @@ export async function DELETE(
 ) {
   await ensureDb();
   await prisma.rule.delete({ where: { id: params.id } });
+  await persistDurableState();
   return Response.json({ ok: true });
 }

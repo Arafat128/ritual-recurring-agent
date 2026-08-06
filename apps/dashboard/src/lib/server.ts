@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { prisma } from "@rra/core";
+import { restoreDurableState } from "@/lib/durableState";
 
 /** Load monorepo .env before touching Prisma (local only; Vercel uses project env). */
 export function ensureEnv() {
@@ -123,4 +124,16 @@ export async function ensureDb() {
     });
   }
   await dbReady;
+
+  // Re-merge shared snapshot every request on Vercel so rules created on
+  // another instance are visible to the worker / status APIs.
+  if (process.env.VERCEL) {
+    try {
+      const { resetRestoreFlag } = await import("@/lib/durableState");
+      resetRestoreFlag();
+      await restoreDurableState();
+    } catch (e) {
+      console.warn("[ensureDb] restoreDurableState", e);
+    }
+  }
 }

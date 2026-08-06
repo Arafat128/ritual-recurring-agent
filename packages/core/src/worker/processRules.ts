@@ -333,6 +333,19 @@ function dueLimit(rule: Rule, prices: Map<string, number>): boolean {
 }
 
 export async function processRules(agentEvm: string): Promise<void> {
+  // Recover rules stuck mid-execution (instance killed mid-tx)
+  try {
+    await prisma.rule.updateMany({
+      where: {
+        status: "executing",
+        updatedAt: { lt: new Date(Date.now() - 120_000) },
+      },
+      data: { status: "active" },
+    });
+  } catch {
+    /* */
+  }
+
   const rules = await prisma.rule.findMany({ where: { status: "active" } });
   const priceIds = new Set<string>();
   for (const r of rules) {

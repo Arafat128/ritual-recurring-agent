@@ -7,14 +7,21 @@ import {
   SEPOLIA_ID,
 } from "@rra/core";
 import { ensureDb } from "@/lib/server";
+import { persistDurableState } from "@/lib/durableState";
+import { ensureWorkerTick } from "@/lib/ensureWorkerTick";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const ALLOWED = new Set([RITUAL_CHAIN_ID, SEPOLIA_ID, BASE_MAINNET_ID]);
 
 export async function GET() {
   await ensureDb();
   const rules = await prisma.rule.findMany({ orderBy: { createdAt: "desc" } });
+  // Publish local rules into shared snapshot (fixes pre-fix multi-instance drift)
+  if (rules.length > 0) {
+    await persistDurableState().catch(() => {});
+  }
   return Response.json(rules);
 }
 
@@ -111,5 +118,18 @@ export async function POST(req: Request) {
       status: "active",
     },
   });
-  return Response.json(rule);
+
+  // Share rule across Vercel instances, then execute immediately if instant
+  await persistDurableState();
+  if (type === "instant") {
+    try {
+      await ensureWorkerTick({ force: true });
+      await persistDurableState();
+    } catch (e) {
+      console.error("[rules] instant execute", e);
+    }
+  }
+
+  const fresh = await prisma.rule.findUnique({ where: { id: rule.id } });
+  return Response.json(fresh || rule);
 }

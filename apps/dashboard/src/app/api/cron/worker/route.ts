@@ -1,5 +1,6 @@
 import { runWorkerTick, getSetting, setSetting } from "@rra/core";
 import { ensureDb } from "@/lib/server";
+import { persistDurableState } from "@/lib/durableState";
 import { writeWorkerCache } from "@/lib/workerCache";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,7 @@ export async function GET(req: Request) {
       agentEvm: result.agentEvm,
       mode: result.mode,
     });
+    await persistDurableState();
 
     return Response.json({
       ok: result.ok,

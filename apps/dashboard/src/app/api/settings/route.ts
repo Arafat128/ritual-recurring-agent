@@ -1,5 +1,6 @@
 import { getSetting, getAppLimits, setAppLimits, prisma } from "@rra/core";
 import { ensureDb } from "@/lib/server";
+import { persistDurableState } from "@/lib/durableState";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,7 @@ export async function PATCH(req: Request) {
 
   try {
     const limits = await setAppLimits(patch);
+    await persistDurableState();
     return Response.json({ ok: true, live: true, limits });
   } catch (e) {
     return Response.json(
