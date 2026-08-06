@@ -9,6 +9,7 @@ const NAV = [
   { href: "/", label: "Overview" },
   { href: "/rules", label: "Rules" },
   { href: "/settings", label: "Settings" },
+  { href: "/guide", label: "Guide" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -34,7 +35,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Ritual Recurring Agent
           </h1>
           <p className="text-[11px] text-white/40">
-            Ritual-first · agent-wallet gated · Base only for live DeFi
+            Multi-user · prepaid RITUAL · shared burner executes · Base for live
+            DeFi
           </p>
         </div>
         <nav className="pill-nav glass flex gap-1 rounded-full p-1 text-xs font-medium">
@@ -90,7 +92,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 {address.slice(0, 6)}…{address.slice(-4)}
                 {chainId != null ? ` · ${chainId}` : ""}
-                {auth.authorized ? " · owner" : " · locked"}
+                {auth.authorized
+                  ? auth.isAdmin
+                    ? " · admin"
+                    : " · signed in"
+                  : " · locked"}
+                {auth.creditEth != null && auth.authorized
+                  ? ` · ${Number(auth.creditEth).toFixed(4)} RIT`
+                  : ""}
               </span>
               {!auth.authorized && (
                 <button
@@ -117,16 +126,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               disabled={connecting || auth.signingIn}
               onClick={() => void connect()}
             >
-              {connecting || auth.signingIn ? "…" : "Connect agent wallet"}
+              {connecting || auth.signingIn ? "…" : "Connect wallet"}
             </button>
           )}
         </div>
       </header>
-      <AuthGate>{children}</AuthGate>
+      {path === "/guide" ? children : <AuthGate>{children}</AuthGate>}
       <footer className="mt-12 border-t border-white/10 pt-6 text-center text-[11px] text-white/30">
-        Dashboard never signs agent txs — the worker EOA executes{" "}
-        <b className="text-white/50">live</b> rules on-chain. Only the agent
-        wallet can view history after SIWE sign-in.
+        Multi-user · you sign in with your wallet · prepaid RITUAL credit ·
+        shared operator burner executes rules on-chain. See{" "}
+        <Link href="/guide" className="text-cyan-300/80 underline">
+          Guide
+        </Link>
+        .
       </footer>
     </div>
   );

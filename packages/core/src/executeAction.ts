@@ -73,6 +73,7 @@ export async function executeAction(tx: TxRequest): Promise<ExecResult> {
   const action = await prisma.action.create({
     data: {
       ruleId: tx.ruleId,
+      ownerAddress: (tx.ownerAddress || "").toLowerCase(),
       type: tx.actionType,
       status: "pending",
       chainId: tx.chainId,

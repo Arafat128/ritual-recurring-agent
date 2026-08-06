@@ -1,13 +1,14 @@
 import {
   buildLoginMessage,
   encodeSession,
+  isAdmin,
   isAllowedOwner,
   normalizeAddress,
   sessionCookieHeader,
   verifyLoginSignature,
 } from "@/lib/auth";
 import { ensureDb } from "@/lib/server";
-import { getSetting } from "@rra/core";
+import { ensureAccount, getSetting } from "@rra/core";
 
 export const dynamic = "force-dynamic";
 
@@ -51,25 +52,23 @@ export async function POST(req: Request) {
     return Response.json({ error: verified.error }, { status: 401 });
   }
 
-  // Optional: if message was rebuilt client-side, still OK if signature verifies
-  const allowed = await isAllowedOwner(address);
-  const agentEvm = (await getSetting("agent.evm")) || null;
-
-  if (!allowed) {
-    // Valid signature but wrong wallet — no session cookie
+  // Multi-tenant: any verified wallet is a user
+  if (!(await isAllowedOwner(address))) {
     return Response.json(
       {
         ok: false,
         authenticated: false,
         authorized: false,
         address,
-        agentEvm,
-        error:
-          "Wallet verified, but it is not the agent EOA. Import/connect the agent wallet to manage rules and history.",
+        error: "Invalid wallet address",
       },
       { status: 403 },
     );
   }
+
+  await ensureAccount(address).catch(() => undefined);
+  const agentEvm = (await getSetting("agent.evm")) || null;
+  const admin = await isAdmin(address);
 
   const token = encodeSession(address);
   return new Response(
@@ -77,8 +76,10 @@ export async function POST(req: Request) {
       ok: true,
       authenticated: true,
       authorized: true,
+      isAdmin: admin,
       address,
       agentEvm,
+      role: admin ? "admin" : "user",
     }),
     {
       status: 200,
@@ -90,7 +91,6 @@ export async function POST(req: Request) {
   );
 }
 
-// Keep buildLoginMessage available for clients that want server-built message
 export async function PUT(req: Request) {
   let body: { address?: string; nonce?: string; chainId?: number };
   try {

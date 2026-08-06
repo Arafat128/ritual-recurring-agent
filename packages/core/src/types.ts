@@ -17,6 +17,8 @@ export interface TxRequest {
   usdValue: number;
   summary: string;
   ruleId?: string;
+  /** Multi-tenant owner of the rule that triggered this action */
+  ownerAddress?: string;
   actionType: RuleAction | "approve";
 }
 

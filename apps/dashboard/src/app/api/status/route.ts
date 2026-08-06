@@ -1,8 +1,15 @@
-import { prisma, getSetting, getAppLimits } from "@rra/core";
+import {
+  prisma,
+  getSetting,
+  getAppLimits,
+  getCreditWei,
+  formatEther,
+  resolveFeeRecipient,
+} from "@rra/core";
 import { ensureDb } from "@/lib/server";
 import { ensureWorkerTick } from "@/lib/ensureWorkerTick";
 import { readWorkerCache, workerIsOnline } from "@/lib/workerCache";
-import { requireOwner, unauthorizedJson } from "@/lib/auth";
+import { isAdmin, requireUser, unauthorizedJson } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -16,10 +23,9 @@ function startOfUtcDay(): Date {
 
 export async function GET(req: Request) {
   await ensureDb();
-  const auth = await requireOwner(req);
+  const auth = await requireUser(req);
   if (!auth.ok) return unauthorizedJson(auth);
 
-  // Hobby plan: only 1 cron/day — keep worker alive while dashboard is open
   let tickMeta: { triggered: boolean } = { triggered: false };
   try {
     tickMeta = await ensureWorkerTick();
@@ -28,6 +34,9 @@ export async function GET(req: Request) {
   }
 
   const since = startOfUtcDay();
+  const admin = await isAdmin(auth.address);
+  const ownerFilter = admin ? {} : { ownerAddress: auth.address };
+
   const [
     rules,
     actions,
@@ -38,9 +47,19 @@ export async function GET(req: Request) {
     actionsToday,
     host,
     cached,
+    creditWei,
+    feeRecipient,
   ] = await Promise.all([
-    prisma.rule.findMany({ orderBy: { createdAt: "desc" }, take: 50 }),
-    prisma.action.findMany({ orderBy: { createdAt: "desc" }, take: 40 }),
+    prisma.rule.findMany({
+      where: ownerFilter,
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
+    prisma.action.findMany({
+      where: ownerFilter,
+      orderBy: { createdAt: "desc" },
+      take: 40,
+    }),
     getSetting("agent.evm"),
     getSetting("worker.lastTickAt"),
     getSetting("worker.startedAt"),
@@ -49,13 +68,15 @@ export async function GET(req: Request) {
       where: {
         status: "executed",
         createdAt: { gte: since },
+        ...(admin ? {} : { ownerAddress: auth.address }),
       },
     }),
     getSetting("worker.host"),
     readWorkerCache(),
+    getCreditWei(auth.address),
+    resolveFeeRecipient(),
   ]);
 
-  // Prefer freshest heartbeat (Runtime Cache spans instances; SQLite is /tmp)
   let lastTick = lastTickDb;
   let started = startedDb;
   let agent = agentDb;
@@ -75,7 +96,13 @@ export async function GET(req: Request) {
 
   return Response.json({
     live: true,
+    multiTenant: true,
+    isAdmin: admin,
+    userAddress: auth.address,
     agentEvm: agent,
+    feeRecipient,
+    creditWei: creditWei.toString(),
+    creditEth: formatEther(creditWei),
     worker: {
       lastTickAt: lastTick,
       startedAt: started,

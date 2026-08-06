@@ -1,10 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useWallet } from "@/lib/wallet";
 
 /**
- * Blocks sensitive dashboard content until the connected wallet has signed
- * in as the agent (or OWNER_ADDRESSES). Wrong wallets see no history/rules.
+ * Blocks sensitive dashboard content until the user has signed in.
+ * Multi-tenant: any wallet can sign in and manage its own rules/credit.
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { address, connecting, connect, auth, signIn } = useWallet();
@@ -13,41 +14,30 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  const agent = auth.agentEvm;
-  const agentShort = agent
-    ? `${agent.slice(0, 6)}…${agent.slice(-4)}`
-    : "agent EOA";
-
   return (
     <div className="glass mx-auto max-w-lg space-y-4 p-6 text-center">
       <h2 className="text-lg font-semibold text-[#c8ff4a]">
-        Agent wallet required
+        Sign in with your wallet
       </h2>
       <p className="text-sm text-white/55">
-        Rules, activity history, and limits are private to the{" "}
-        <b className="text-white/80">agent EOA</b>. Connecting any other wallet
-        will not show that data.
+        This is a <b className="text-white/80">multi-user</b> agent service.
+        Connect <b className="text-white/80">your</b> wallet, top up RITUAL
+        credit, create rules, and the shared operator burner executes them.
       </p>
 
-      {agent && (
-        <p className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 font-mono text-[12px] text-cyan-200/90">
-          Required: {agentShort}
-          <span className="mt-1 block break-all text-[10px] text-white/40">
-            {agent}
-          </span>
-        </p>
-      )}
-
-      {!agent && (
-        <p className="text-[12px] text-amber-200/80">
-          Agent not registered yet. Start the worker once so the agent EOA is
-          saved, then connect that wallet here.
-        </p>
-      )}
+      <p className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[12px] text-white/50">
+        Free signature to log in (no gas). Rules and history stay private to
+        your address. See the{" "}
+        <Link href="/guide" className="text-cyan-300 underline">
+          setup guide
+        </Link>
+        .
+      </p>
 
       {address && !auth.authorized && (
-        <p className="text-[12px] text-rose-200/85">
-          Connected {address.slice(0, 6)}…{address.slice(-4)} is not authorized.
+        <p className="text-[12px] text-amber-200/85">
+          Connected {address.slice(0, 6)}…{address.slice(-4)} — sign in to
+          unlock your rules.
           {auth.authError ? ` ${auth.authError}` : ""}
         </p>
       )}
@@ -60,7 +50,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             disabled={connecting || auth.signingIn}
             onClick={() => void connect()}
           >
-            {connecting || auth.signingIn ? "…" : "Connect agent wallet"}
+            {connecting || auth.signingIn ? "…" : "Connect wallet"}
           </button>
         ) : (
           <button
@@ -75,8 +65,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       </div>
 
       <p className="text-[10px] text-white/35">
-        Sign-in uses a free signature (no gas). Session is HttpOnly and expires
-        in 24h.
+        Session is HttpOnly and expires in 24h. Operators run a separate worker
+        with the burner key.
       </p>
     </div>
   );

@@ -13,8 +13,10 @@ import { api } from "@/lib/api";
 type AuthState = {
   authenticated: boolean;
   authorized: boolean;
+  isAdmin: boolean;
   sessionAddress: string | null;
   agentEvm: string | null;
+  creditEth: string | null;
   signingIn: boolean;
   authError: string | null;
 };
@@ -70,8 +72,10 @@ async function switchChain(chainId: number, add?: Record<string, unknown>) {
 const emptyAuth: AuthState = {
   authenticated: false,
   authorized: false,
+  isAdmin: false,
   sessionAddress: null,
   agentEvm: null,
+  creditEth: null,
   signingIn: false,
   authError: null,
 };
@@ -90,8 +94,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         ...a,
         authenticated: Boolean(data.authenticated),
         authorized: Boolean(data.authorized),
+        isAdmin: Boolean(data.isAdmin),
         sessionAddress: data.address || null,
         agentEvm: data.agentEvm || null,
+        creditEth: data.creditEth != null ? String(data.creditEth) : null,
         authError: null,
       }));
     } catch {
@@ -99,7 +105,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         ...a,
         authenticated: false,
         authorized: false,
+        isAdmin: false,
         sessionAddress: null,
+        creditEth: null,
       }));
     }
   }, []);
@@ -159,12 +167,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         setAuth({
           authenticated: false,
           authorized: false,
+          isAdmin: false,
           sessionAddress: null,
           agentEvm: data.agentEvm || null,
+          creditEth: null,
           signingIn: false,
-          authError:
-            data.error ||
-            "This wallet is not the agent. Connect the agent EOA to view history and rules.",
+          authError: data.error || "Sign-in failed — try again",
         });
         return false;
       }
@@ -172,11 +180,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setAuth({
         authenticated: true,
         authorized: true,
+        isAdmin: Boolean(data.isAdmin),
         sessionAddress: data.address,
         agentEvm: data.agentEvm || null,
+        creditEth: null,
         signingIn: false,
         authError: null,
       });
+      await refreshAuth();
       return true;
     } catch (e) {
       setAuth((a) => ({
@@ -188,7 +199,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       }));
       return false;
     }
-  }, [chainId]);
+  }, [chainId, refreshAuth]);
 
   const refresh = useCallback(async () => {
     const eth = getEth();

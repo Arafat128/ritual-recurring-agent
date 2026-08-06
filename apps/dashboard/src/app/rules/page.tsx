@@ -85,14 +85,19 @@ const emptyForm = {
 
 export default function RulesPage() {
   const [config, setConfig] = useState<any>(null);
+  const [account, setAccount] = useState<any>(null);
+  const [quote, setQuote] = useState<any>(null);
   const [rules, setRules] = useState<any[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [sched, setSched] = useState<Sched>(defaultSched);
   const [busy, setBusy] = useState(false);
+  const [topupBusy, setTopupBusy] = useState(false);
+  const [topupTx, setTopupTx] = useState("");
+  const [topupAmount, setTopupAmount] = useState("0.01");
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
-  const load = () =>
+  const load = () => {
     api("/api/rules")
       .then(async (r) => {
         if (!r.ok) {
@@ -102,6 +107,12 @@ export default function RulesPage() {
         setRules(await r.json());
       })
       .catch(() => {});
+    api("/api/account")
+      .then(async (r) => {
+        if (r.ok) setAccount(await r.json());
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     api("/api/config")
@@ -118,6 +129,25 @@ export default function RulesPage() {
     setSched((s) => ({ ...s, [k]: v }));
 
   const cron = useMemo(() => buildCron(sched), [sched]);
+  const intervalMinutes = useMemo(() => {
+    if (form.type !== "scheduled") return null;
+    if (sched.freq === "minutes") return Number(sched.everyMin) || 5;
+    if (sched.freq === "hours") return (Number(sched.everyHr) || 6) * 60;
+    return 24 * 60;
+  }, [form.type, sched]);
+
+  useEffect(() => {
+    const q = new URLSearchParams({
+      type: form.type,
+      action: form.action,
+    });
+    if (intervalMinutes != null) q.set("intervalMinutes", String(intervalMinutes));
+    api(`/api/fees/quote?${q}`)
+      .then((r) => r.json())
+      .then(setQuote)
+      .catch(() => setQuote(null));
+  }, [form.type, form.action, intervalMinutes]);
+
   const chain = config?.chains?.find(
     (c: any) => c.chainId === Number(form.chainId)
   );
@@ -172,14 +202,94 @@ export default function RulesPage() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "failed");
-      setOk(`Rule created · ${data.type} ${data.action}`);
+      if (!res.ok) {
+        const hint = data.hint ? ` — ${data.hint}` : "";
+        throw new Error((data.error || "failed") + hint);
+      }
+      setOk(
+        `Rule created · ${data.type} ${data.action}` +
+          (data.feeChargedEth ? ` · charged ${data.feeChargedEth} RITUAL` : ""),
+      );
       setForm(emptyForm);
       load();
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function topUp() {
+    setTopupBusy(true);
+    setErr("");
+    setOk("");
+    try {
+      const eth = (window as unknown as { ethereum?: any }).ethereum;
+      if (!eth) throw new Error("No wallet");
+      const accounts = (await eth.request({
+        method: "eth_requestAccounts",
+      })) as string[];
+      const from = accounts[0];
+      const to = account?.feeRecipient || config?.fees?.feeRecipient;
+      if (!to) {
+        throw new Error(
+          "Fee recipient not configured — operator must set FEE_RECIPIENT or start the worker",
+        );
+      }
+      const chainIdHex = (await eth.request({ method: "eth_chainId" })) as string;
+      if (Number(chainIdHex) !== 1979) {
+        throw new Error("Switch to Ritual Testnet (1979) to pay fees in RITUAL");
+      }
+      const valueEth = topupAmount || "0.01";
+      // eth value as hex wei
+      const wei = BigInt(Math.floor(Number(valueEth) * 1e18));
+      const hash = (await eth.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            from,
+            to,
+            value: `0x${wei.toString(16)}`,
+          },
+        ],
+      })) as string;
+      setTopupTx(hash);
+      // Wait a few seconds then credit
+      await new Promise((r) => setTimeout(r, 4000));
+      const res = await api("/api/account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ txHash: hash }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Credit failed");
+      setOk(`Top-up credited · +${data.creditedEth} RITUAL · balance ${data.creditEth}`);
+      load();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Top-up failed");
+    } finally {
+      setTopupBusy(false);
+    }
+  }
+
+  async function creditExistingTx() {
+    if (!topupTx.trim()) return;
+    setTopupBusy(true);
+    setErr("");
+    try {
+      const res = await api("/api/account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ txHash: topupTx.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Credit failed");
+      setOk(`Credited · +${data.creditedEth} RITUAL · balance ${data.creditEth}`);
+      load();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Credit failed");
+    } finally {
+      setTopupBusy(false);
     }
   }
 
@@ -235,15 +345,92 @@ export default function RulesPage() {
         ? `${form.direction} $${form.targetPrice || "?"} (${form.priceTokenId})`
         : "fires once on next worker tick";
 
+  const feeTo = account?.feeRecipient || config?.fees?.feeRecipient;
+
   return (
+    <div className="space-y-6">
+      <div className="glass space-y-3 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-[#c8ff4a]">
+              Your RITUAL credit
+            </h2>
+            <p className="mt-1 text-[11px] text-white/45">
+              Prepaid balance pays <b className="text-white/70">create</b> +{" "}
+              <b className="text-white/70">run</b> fees. A shared operator burner
+              executes your rules. Top up by sending RITUAL on chain{" "}
+              <b className="text-white/70">1979</b> to the fee recipient.
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#c8ff4a]/25 bg-[#c8ff4a]/5 px-4 py-2 text-right">
+            <div className="text-[10px] uppercase tracking-wide text-white/40">
+              Balance
+            </div>
+            <div className="font-mono text-lg text-[#c8ff4a]">
+              {account?.creditEth != null
+                ? `${Number(account.creditEth).toFixed(5)} RIT`
+                : "—"}
+            </div>
+          </div>
+        </div>
+        {feeTo && (
+          <p className="break-all font-mono text-[10px] text-cyan-200/80">
+            Fee recipient: {feeTo}
+          </p>
+        )}
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block text-[11px] text-white/45">
+            Top-up amount (RITUAL)
+            <input
+              className="input mt-1 w-32"
+              value={topupAmount}
+              onChange={(e) => setTopupAmount(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={topupBusy || !feeTo}
+            onClick={() => void topUp()}
+          >
+            {topupBusy ? "…" : "Pay & credit"}
+          </button>
+          <label className="block min-w-[12rem] flex-1 text-[11px] text-white/45">
+            Or paste tx hash
+            <input
+              className="input mt-1 font-mono text-xs"
+              placeholder="0x…"
+              value={topupTx}
+              onChange={(e) => setTopupTx(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            disabled={topupBusy || !topupTx.trim()}
+            onClick={() => void creditExistingTx()}
+          >
+            Credit tx
+          </button>
+        </div>
+      </div>
+
     <div className="grid gap-6 lg:grid-cols-5">
       <form onSubmit={submit} className="glass space-y-3 p-5 lg:col-span-2">
         <h2 className="text-lg font-semibold text-[#c8ff4a]">New rule</h2>
         <p className="text-[11px] text-white/40">
-          Recurring agent: schedule send / swap / bridge — same idea as DeFi
-          Autopilot. Worker executes. Preview:{" "}
+          Charged from your prepaid credit. Shared burner executes. Preview:{" "}
           <b className="text-white/60">{preview}</b>
         </p>
+        {quote && (
+          <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[11px] text-white/55">
+            Create fee:{" "}
+            <b className="text-[#c8ff4a]">{quote.createFeeEth} RITUAL</b>
+            {" · "}
+            Each run:{" "}
+            <b className="text-cyan-200/90">{quote.runFeeEth} RITUAL</b>
+          </div>
+        )}
 
         <label className="block text-[11px] text-white/45">
           When (trigger)
@@ -527,6 +714,7 @@ export default function RulesPage() {
           ))}
         </ul>
       </div>
+    </div>
     </div>
   );
 }

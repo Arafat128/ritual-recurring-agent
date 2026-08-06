@@ -3,6 +3,8 @@ export * from "./types.js";
 export * from "./env.js";
 export * from "./db.js";
 export * from "./limits.js";
+export * from "./fees.js";
+export * from "./payments.js";
 export * from "./executeAction.js";
 export * from "./routing/uniswap.js";
 export * from "./routing/lifi.js";

@@ -11,6 +11,7 @@ type Limits = {
 
 export default function SettingsPage() {
   const [status, setStatus] = useState<any>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [maxTxUsd, setMaxTxUsd] = useState("25");
   const [maxTxPerDay, setMaxTxPerDay] = useState("20");
   const [loopSec, setLoopSec] = useState("30");
@@ -30,6 +31,7 @@ export default function SettingsPage() {
         if (!r.ok) return;
         const s = await r.json();
         setStatus(s);
+        setIsAdmin(Boolean(s.isAdmin));
         if (s.limits) applyLimits(s.limits as Limits);
         if (s.usage?.actionsToday != null) setUsageToday(s.usage.actionsToday);
       })
@@ -39,6 +41,7 @@ export default function SettingsPage() {
         if (!r.ok) return;
         const s = await r.json();
         setStatus((prev: any) => ({ ...prev, agentEvm: s.agentEvm, ...s }));
+        setIsAdmin(Boolean(s.isAdmin));
         if (s.limits) applyLimits(s.limits as Limits);
         if (s.usage?.actionsToday != null) setUsageToday(s.usage.actionsToday);
       })
@@ -98,17 +101,17 @@ export default function SettingsPage() {
       <div className="glass p-6">
         <h2 className="text-lg font-semibold text-[#c8ff4a]">Settings</h2>
         <p className="mt-1 text-sm text-white/45">
-          Safety limits for Ritual Recurring Agent. Stored in SQLite and
-          re-read by the worker each tick — no restart required.
+          Multi-tenant operator view. Users manage credit on the Rules page;
+          only admins can edit global burner limits.
         </p>
 
         <div className="mt-6 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4">
           <div className="text-sm font-semibold text-rose-100">
-            LIVE execution
+            LIVE multi-user execution
           </div>
           <p className="mt-1 max-w-xl text-[12px] text-white/55">
-            Dry run is removed. The worker broadcasts real transactions when
-            rules fire. Use a funded burner key on Ritual testnet for sends.
+            Shared burner executes all users&apos; due rules. Fund{" "}
+            <code className="text-white/70">AGENT_PRIVATE_KEY</code> on Ritual.
             Keep <code className="text-white/70">maxTxUsd</code> /{" "}
             <code className="text-white/70">maxTxPerDay</code> low while testing.
           </p>
@@ -116,11 +119,13 @@ export default function SettingsPage() {
 
         <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-            <dt className="text-[10px] uppercase text-white/40">Mode</dt>
-            <dd className="mt-1 font-mono text-rose-200">LIVE</dd>
+            <dt className="text-[10px] uppercase text-white/40">Role</dt>
+            <dd className="mt-1 font-mono text-rose-200">
+              {isAdmin ? "ADMIN" : "USER"}
+            </dd>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-            <dt className="text-[10px] uppercase text-white/40">Agent EOA</dt>
+            <dt className="text-[10px] uppercase text-white/40">Executor burner</dt>
             <dd className="mt-1 break-all font-mono text-[11px] text-white/80">
               {status?.agentEvm || "set AGENT_PRIVATE_KEY and start worker"}
             </dd>
@@ -131,10 +136,9 @@ export default function SettingsPage() {
       <div className="glass p-6">
         <h3 className="text-sm font-semibold text-cyan-200">App limits</h3>
         <p className="mt-1 text-[12px] text-white/45">
-          Cap how much the agent can do. These override{" "}
-          <code className="text-white/60">MAX_TX_USD</code> /{" "}
-          <code className="text-white/60">MAX_TX_PER_DAY</code> from{" "}
-          <code className="text-white/60">.env</code> once saved.
+          {isAdmin
+            ? "Operator caps for the shared burner. Overrides .env once saved."
+            : "Read-only operator caps. Contact the operator to change them."}
         </p>
 
         <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-3">
@@ -172,8 +176,9 @@ export default function SettingsPage() {
                 max={1_000_000}
                 step="0.01"
                 value={maxTxUsd}
+                disabled={!isAdmin}
                 onChange={(e) => setMaxTxUsd(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50"
+                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50 disabled:opacity-50"
               />
               <span className="mt-1 block text-[10px] text-white/35">
                 Skip if estimated $ value exceeds this
@@ -190,8 +195,9 @@ export default function SettingsPage() {
                 max={10_000}
                 step={1}
                 value={maxTxPerDay}
+                disabled={!isAdmin}
                 onChange={(e) => setMaxTxPerDay(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50"
+                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50 disabled:opacity-50"
               />
               <span className="mt-1 block text-[10px] text-white/35">
                 UTC day cap (executed only)
@@ -208,8 +214,9 @@ export default function SettingsPage() {
                 max={600}
                 step={1}
                 value={loopSec}
+                disabled={!isAdmin}
                 onChange={(e) => setLoopSec(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50"
+                className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400/50 disabled:opacity-50"
               />
               <span className="mt-1 block text-[10px] text-white/35">
                 How often the agent checks rules (10–600s)
@@ -218,25 +225,33 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="submit"
-              disabled={savingLimits}
-              className="btn-primary disabled:opacity-50"
-            >
-              {savingLimits ? "Saving…" : "Save limits"}
-            </button>
-            <button
-              type="button"
-              disabled={savingLimits}
-              onClick={() => {
-                setMaxTxUsd("25");
-                setMaxTxPerDay("20");
-                setLoopSec("30");
-              }}
-              className="btn-ghost text-[12px]"
-            >
-              Reset fields to defaults
-            </button>
+            {isAdmin ? (
+              <>
+                <button
+                  type="submit"
+                  disabled={savingLimits}
+                  className="btn-primary disabled:opacity-50"
+                >
+                  {savingLimits ? "Saving…" : "Save limits"}
+                </button>
+                <button
+                  type="button"
+                  disabled={savingLimits}
+                  onClick={() => {
+                    setMaxTxUsd("25");
+                    setMaxTxPerDay("20");
+                    setLoopSec("30");
+                  }}
+                  className="btn-ghost text-[12px]"
+                >
+                  Reset fields to defaults
+                </button>
+              </>
+            ) : (
+              <p className="text-[12px] text-white/40">
+                Read-only — operator wallet required to edit limits.
+              </p>
+            )}
           </div>
           {limitsMsg && (
             <p

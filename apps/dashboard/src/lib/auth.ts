@@ -1,11 +1,12 @@
 /**
- * Multi-layer dashboard auth (SIWE-lite).
+ * Multi-layer dashboard auth (SIWE-lite) — multi-tenant.
  *
  * Layer 1: Wallet must cryptographically sign a login message (not spoofable).
  * Layer 2: Session cookie is HttpOnly + HMAC-signed (not forgeable without secret).
- * Layer 3: Address must match agent EOA (or OWNER_ADDRESSES allowlist).
- * Layer 4: Session expires (default 24h).
- * Layer 5: Sensitive APIs refuse unauthenticated / unauthorized callers.
+ * Layer 3: Any verified wallet is a **user** (owns their own rules/credit).
+ * Layer 4: **Admin** = agent EOA and/or OWNER_ADDRESSES (global settings only).
+ * Layer 5: Session expires (default 24h).
+ * Layer 6: Sensitive APIs refuse unauthenticated callers.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { verifyMessage } from "viem";
@@ -69,8 +70,8 @@ export function normalizeAddress(addr: string): string {
   return addr.trim().toLowerCase();
 }
 
-/** Agent EOA + optional OWNER_ADDRESSES (comma-separated) */
-export async function getAllowedOwners(): Promise<string[]> {
+/** Operator / admin wallets: agent EOA + OWNER_ADDRESSES (comma-separated) */
+export async function getAdminAddresses(): Promise<string[]> {
   const set = new Set<string>();
   const agent = await getSetting("agent.evm");
   if (agent) set.add(normalizeAddress(agent));
@@ -83,14 +84,25 @@ export async function getAllowedOwners(): Promise<string[]> {
   return Array.from(set);
 }
 
+/** @deprecated use getAdminAddresses — kept for older imports */
+export async function getAllowedOwners(): Promise<string[]> {
+  return getAdminAddresses();
+}
+
+/** True if address may manage global operator settings */
+export async function isAdmin(address: string | null | undefined): Promise<boolean> {
+  if (!address) return false;
+  const admins = await getAdminAddresses();
+  return admins.includes(normalizeAddress(address));
+}
+
+/**
+ * Any signed-in wallet is a multi-tenant user.
+ * (Historically only the agent EOA was allowed — that blocked public use.)
+ */
 export async function isAllowedOwner(address: string | null | undefined): Promise<boolean> {
   if (!address) return false;
-  const owners = await getAllowedOwners();
-  if (owners.length === 0) {
-    // No agent registered yet — deny data access (safer than open)
-    return false;
-  }
-  return owners.includes(normalizeAddress(address));
+  return /^0x[0-9a-f]{40}$/.test(normalizeAddress(address));
 }
 
 /**
@@ -280,15 +292,15 @@ export type AuthResult =
   | { ok: false; status: number; error: string; code: string };
 
 /**
- * Require signed-in owner session for sensitive APIs.
+ * Require signed-in **user** session (any wallet that completed SIWE).
  */
-export async function requireOwner(req: Request): Promise<AuthResult> {
+export async function requireUser(req: Request): Promise<AuthResult> {
   const session = getSessionFromRequest(req);
   if (!session) {
     return {
       ok: false,
       status: 401,
-      error: "Sign in with the agent wallet to view this data",
+      error: "Sign in with your wallet to continue",
       code: "UNAUTHENTICATED",
     };
   }
@@ -296,12 +308,31 @@ export async function requireOwner(req: Request): Promise<AuthResult> {
     return {
       ok: false,
       status: 403,
-      error:
-        "This wallet is not authorized. Connect and sign in with the agent EOA.",
+      error: "Invalid session address",
       code: "FORBIDDEN",
     };
   }
   return { ok: true, address: session.address };
+}
+
+/** @deprecated alias — multi-tenant users use requireUser */
+export async function requireOwner(req: Request): Promise<AuthResult> {
+  return requireUser(req);
+}
+
+/** Operator-only (agent EOA or OWNER_ADDRESSES) */
+export async function requireAdmin(req: Request): Promise<AuthResult> {
+  const user = await requireUser(req);
+  if (!user.ok) return user;
+  if (!(await isAdmin(user.address))) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Operator only — admin settings require the agent or OWNER_ADDRESSES wallet",
+      code: "FORBIDDEN_ADMIN",
+    };
+  }
+  return user;
 }
 
 export function unauthorizedJson(auth: Extract<AuthResult, { ok: false }>) {

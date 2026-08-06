@@ -1,7 +1,12 @@
 import { getSetting, getAppLimits, setAppLimits, prisma } from "@rra/core";
 import { ensureDb } from "@/lib/server";
 import { persistDurableState } from "@/lib/durableState";
-import { requireOwner, unauthorizedJson } from "@/lib/auth";
+import {
+  isAdmin,
+  requireUser,
+  requireAdmin,
+  unauthorizedJson,
+} from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +19,10 @@ function startOfUtcDay(): Date {
 
 export async function GET(req: Request) {
   await ensureDb();
-  const auth = await requireOwner(req);
+  const auth = await requireUser(req);
   if (!auth.ok) return unauthorizedJson(auth);
 
+  const admin = await isAdmin(auth.address);
   const [agent, limits] = await Promise.all([
     getSetting("agent.evm"),
     getAppLimits(),
@@ -26,12 +32,22 @@ export async function GET(req: Request) {
     where: {
       status: "executed",
       createdAt: { gte: since },
+      ...(admin ? {} : { ownerAddress: auth.address }),
     },
   });
   return Response.json({
     live: true,
+    multiTenant: true,
+    isAdmin: admin,
     agentEvm: agent,
-    limits,
+    limits: admin
+      ? limits
+      : {
+          // Users see read-only operator caps (not editable)
+          maxTxUsd: limits.maxTxUsd,
+          maxTxPerDay: limits.maxTxPerDay,
+          loopIntervalMs: limits.loopIntervalMs,
+        },
     usage: {
       actionsToday,
       dayUtc: since.toISOString().slice(0, 10),
@@ -42,14 +58,14 @@ export async function GET(req: Request) {
 type PatchBody = {
   maxTxUsd?: number;
   maxTxPerDay?: number;
-  /** Seconds in UI; stored as ms */
   loopIntervalSec?: number;
   loopIntervalMs?: number;
 };
 
+/** Operator-only global limit updates */
 export async function PATCH(req: Request) {
   await ensureDb();
-  const auth = await requireOwner(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return unauthorizedJson(auth);
 
   let body: PatchBody;

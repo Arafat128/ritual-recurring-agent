@@ -18,6 +18,8 @@ import {
   buildApproveIfNeeded,
 } from "../routing/lifi.js";
 import type { TxRequest } from "../types.js";
+import { feeRunWei } from "../fees.js";
+import { debitAccount } from "../payments.js";
 import { getPrices } from "./prices.js";
 import { notify } from "./notify.js";
 
@@ -92,6 +94,7 @@ async function runRule(
   });
   if (claimed.count === 0) return;
 
+  const owner = (rule.ownerAddress || "").toLowerCase();
   const chain = CHAINS[rule.chainId];
   const native = chain?.nativeSymbol ?? "ETH";
   const summaryBase =
@@ -104,6 +107,40 @@ async function runRule(
           : `swap ${rule.amount} ${rule.tokenIn} → ${rule.tokenOut}`;
 
   try {
+    // Multi-tenant: charge run fee from user prepaid credit before executing
+    if (owner) {
+      const runFee = feeRunWei(rule.action);
+      const deb = await debitAccount({
+        address: owner,
+        amountWei: runFee,
+        kind: "run_fee",
+        ruleId: rule.id,
+        note: `run ${rule.action}`,
+      });
+      if (!deb.ok) {
+        await prisma.rule.update({
+          where: { id: rule.id },
+          data: {
+            status: "paused",
+            lastError: deb.error,
+            lastRunAt: new Date(),
+          },
+        });
+        await prisma.action.create({
+          data: {
+            ruleId: rule.id,
+            ownerAddress: owner,
+            type: rule.action,
+            status: "skipped",
+            chainId: rule.chainId || RITUAL_CHAIN_ID,
+            summary: `${summaryBase} — paused: ${deb.error}`,
+            usdValue: 0,
+          },
+        });
+        return;
+      }
+    }
+
     await notify(`Rule: ${rule.type} — ${summaryBase}`);
     let usd = parseAmountUsd(rule, prices);
     const txs: TxRequest[] = [];
@@ -112,6 +149,7 @@ async function runRule(
       await prisma.action.create({
         data: {
           ruleId: rule.id,
+          ownerAddress: owner,
           type: "ritual_ping",
           status: "executed",
           chainId: rule.chainId || RITUAL_CHAIN_ID,
@@ -132,6 +170,7 @@ async function runRule(
         usdValue: usd,
         summary: summaryBase,
         ruleId: rule.id,
+        ownerAddress: owner,
         actionType: "send",
       });
     } else if (rule.action === "swap") {
@@ -150,6 +189,7 @@ async function runRule(
             usdValue: 0,
             summary: `approve ${rule.tokenIn} for Uniswap`,
             ruleId: rule.id,
+            ownerAddress: owner,
             actionType: "approve",
           });
         }
@@ -158,6 +198,7 @@ async function runRule(
           usdValue: usd,
           summary: `${summaryBase} via Uniswap v3 [Sepolia]`,
           ruleId: rule.id,
+          ownerAddress: owner,
           actionType: "swap",
         });
       } else if (rule.chainId === BASE_MAINNET_ID && c.allowLiveDefi) {
@@ -188,6 +229,7 @@ async function runRule(
               usdValue: 0,
               summary: `approve ${rule.tokenIn} for LI.FI`,
               ruleId: rule.id,
+              ownerAddress: owner,
               actionType: "approve",
             });
           }
@@ -197,12 +239,14 @@ async function runRule(
           usdValue: usd,
           summary: `${summaryBase} via LI.FI/${quote.tool} [Base]`,
           ruleId: rule.id,
+          ownerAddress: owner,
           actionType: "swap",
         });
       } else {
         await prisma.action.create({
           data: {
             ruleId: rule.id,
+            ownerAddress: owner,
             type: "swap",
             status: "skipped",
             chainId: rule.chainId,
@@ -222,6 +266,7 @@ async function runRule(
         await prisma.action.create({
           data: {
             ruleId: rule.id,
+            ownerAddress: owner,
             type: "bridge",
             status: "skipped",
             chainId: fromId,
@@ -237,6 +282,7 @@ async function runRule(
         await prisma.action.create({
           data: {
             ruleId: rule.id,
+            ownerAddress: owner,
             type: "bridge",
             status: "skipped",
             chainId: fromId,
@@ -276,6 +322,7 @@ async function runRule(
             usdValue: 0,
             summary: `approve ${rule.tokenIn} for LI.FI bridge`,
             ruleId: rule.id,
+            ownerAddress: owner,
             actionType: "approve",
           });
         }
@@ -285,6 +332,7 @@ async function runRule(
         usdValue: usd,
         summary: `${summaryBase} via LI.FI/${quote.tool}`,
         ruleId: rule.id,
+        ownerAddress: owner,
         actionType: "bridge",
       });
     }

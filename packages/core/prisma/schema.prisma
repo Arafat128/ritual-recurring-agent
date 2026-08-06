@@ -9,19 +9,43 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Agent identity (worker EOA)
+/// Registered wallet identity (users + optional label)
 model User {
   id         String   @id @default(cuid())
   evmAddress String   @unique
-  label      String   @default("ritual-agent")
+  label      String   @default("user")
   createdAt  DateTime @default(now())
+}
+
+/// Prepaid RITUAL credit balance per user (wei as decimal string)
+model Account {
+  address   String   @id
+  creditWei String   @default("0")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// On-chain / ledger payments (top-ups, create fees, run fees)
+model Payment {
+  id        String   @id @default(cuid())
+  address   String
+  kind      String
+  amountWei String
+  txHash    String?  @unique
+  ruleId    String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([address])
 }
 
 /// type: limit_order | scheduled | instant
 /// action: send | swap | bridge | ritual_ping
 /// chainId: 1979 Ritual | 11155111 Sepolia | 8453 Base (only live DeFi mainnet)
+/// ownerAddress: wallet that owns this rule (multi-tenant)
 model Rule {
   id           String    @id @default(cuid())
+  ownerAddress String    @default("")
   type         String
   action       String
   status       String    @default("active")
@@ -41,27 +65,35 @@ model Rule {
   lastRunAt    DateTime?
   lastError    String?
   failCount    Int       @default(0)
+  // fees
+  createFeeWei String    @default("0")
   // ritual-native notes (optional JSON)
   metaJson     String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   actions      Action[]
+
+  @@index([ownerAddress])
+  @@index([status])
 }
 
 model Action {
-  id        String   @id @default(cuid())
-  ruleId    String?
-  rule      Rule?    @relation(fields: [ruleId], references: [id], onDelete: SetNull)
-  type      String
-  status    String   @default("pending")
-  chainId   Int
-  summary   String
-  command   String?
-  txHash    String?
-  error     String?
-  usdValue  Float?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  ruleId       String?
+  rule         Rule?    @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  ownerAddress String   @default("")
+  type         String
+  status       String   @default("pending")
+  chainId      Int
+  summary      String
+  command      String?
+  txHash       String?
+  error        String?
+  usdValue     Float?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([ownerAddress])
 }
 
 model Setting {

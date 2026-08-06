@@ -59,6 +59,8 @@ export default function OverviewPage() {
   const deletableCount = actions.filter((a) =>
     DELETABLE_STATUSES.has(a.status),
   ).length;
+  const creditEth = status?.creditEth as string | undefined;
+  const feeRecipient = status?.feeRecipient as string | undefined;
 
   async function copyHash(hash: string) {
     try {
@@ -127,20 +129,25 @@ export default function OverviewPage() {
           <div>
             <h2 className="mb-1 text-2xl font-semibold text-white">Overview</h2>
             <p className="max-w-xl text-sm text-white/45">
-              Recurring{" "}
-              <b className="text-white/70">send · swap · bridge</b> rules —
-              Ritual-first, Sepolia for test swaps,{" "}
+              Multi-user recurring{" "}
+              <b className="text-white/70">send · swap · bridge · ping</b> —
+              you prepay RITUAL credit; a shared burner executes due rules.
+              Ritual-first;{" "}
               <span className="text-cyan-300">Base mainnet</span> only for live
-              DeFi. All actions execute on-chain.
+              DeFi.
             </p>
           </div>
           <span className="rounded-full border border-rose-400/40 bg-rose-500/20 px-4 py-2 text-xs font-bold uppercase tracking-wide text-rose-100">
-            LIVE · on-chain
+            MULTI-USER · LIVE
           </span>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {[
+            [
+              "Your credit",
+              creditEth != null ? `${Number(creditEth).toFixed(4)} RIT` : "—",
+            ],
             ["Active rules", status?.counts?.active ?? "—"],
             ["Actions", status?.counts?.actions ?? "—"],
             [
@@ -187,23 +194,28 @@ export default function OverviewPage() {
             </div>
           ))}
         </div>
-        {status?.agentEvm && (
-          <p className="mt-3 font-mono text-[11px] text-white/40">
-            Agent EOA: {status.agentEvm}
+        {(status?.agentEvm || feeRecipient) && (
+          <p className="mt-3 break-all font-mono text-[11px] text-white/40">
+            {status?.agentEvm ? `Executor burner: ${status.agentEvm}` : ""}
+            {feeRecipient ? ` · fees → ${feeRecipient}` : ""}
             {status?.worker?.host ? ` · host: ${status.worker.host}` : ""}
+            {status?.isAdmin ? " · you are admin" : ""}
           </p>
         )}
         {!status?.worker?.online && (
           <p className="mt-2 text-[11px] text-amber-200/80">
-            Worker offline — open this page a moment (status poll starts the
-            Vercel tick) or run <code className="text-white/50">npm run worker</code>{" "}
-            locally. Hobby plan: daily cron + live ticks while the dashboard is
+            Worker offline — operator must run{" "}
+            <code className="text-white/50">npm run worker</code> (or cron with
+            burner key). Status poll may wake a Vercel tick while this page is
             open.
           </p>
         )}
         <div className="mt-4 flex flex-wrap gap-2">
           <Link href="/rules" className="btn-primary">
-            Create rule
+            Rules & credit
+          </Link>
+          <Link href="/guide" className="btn-ghost">
+            Guide
           </Link>
           <Link href="/settings" className="btn-ghost">
             Settings
