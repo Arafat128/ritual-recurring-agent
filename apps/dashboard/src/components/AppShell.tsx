@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useWallet } from "@/lib/wallet";
+import { AuthGate } from "@/components/AuthGate";
 
 const NAV = [
   { href: "/", label: "Overview" },
@@ -21,6 +22,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     switchToRitual,
     switchToBase,
     switchToSepolia,
+    auth,
+    signIn,
   } = useWallet();
 
   return (
@@ -31,7 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Ritual Recurring Agent
           </h1>
           <p className="text-[11px] text-white/40">
-            Ritual-first · Base mainnet only for live DeFi
+            Ritual-first · agent-wallet gated · Base only for live DeFi
           </p>
         </div>
         <nav className="pill-nav glass flex gap-1 rounded-full p-1 text-xs font-medium">
@@ -80,14 +83,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 Base
               </button>
-              <span className="hidden font-mono text-[11px] text-white/50 sm:inline">
+              <span
+                className={`hidden font-mono text-[11px] sm:inline ${
+                  auth.authorized ? "text-emerald-300/90" : "text-amber-200/80"
+                }`}
+              >
                 {address.slice(0, 6)}…{address.slice(-4)}
                 {chainId != null ? ` · ${chainId}` : ""}
+                {auth.authorized ? " · owner" : " · locked"}
               </span>
+              {!auth.authorized && (
+                <button
+                  type="button"
+                  className="btn-ghost text-xs"
+                  disabled={auth.signingIn}
+                  onClick={() => void signIn()}
+                >
+                  {auth.signingIn ? "Signing…" : "Sign in"}
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-ghost text-xs"
-                onClick={() => disconnect()}
+                onClick={() => void disconnect()}
               >
                 Disconnect
               </button>
@@ -96,19 +114,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               className="btn-primary"
-              disabled={connecting}
+              disabled={connecting || auth.signingIn}
               onClick={() => void connect()}
             >
-              {connecting ? "…" : "Connect wallet"}
+              {connecting || auth.signingIn ? "…" : "Connect agent wallet"}
             </button>
           )}
         </div>
       </header>
-      {children}
+      <AuthGate>{children}</AuthGate>
       <footer className="mt-12 border-t border-white/10 pt-6 text-center text-[11px] text-white/30">
         Dashboard never signs agent txs — the worker EOA executes{" "}
-        <b className="text-white/50">live</b> rules on-chain. Fund a burner key
-        before enabling send rules.
+        <b className="text-white/50">live</b> rules on-chain. Only the agent
+        wallet can view history after SIWE sign-in.
       </footer>
     </div>
   );

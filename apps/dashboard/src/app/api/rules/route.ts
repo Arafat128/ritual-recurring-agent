@@ -9,14 +9,18 @@ import {
 import { ensureDb } from "@/lib/server";
 import { persistDurableState } from "@/lib/durableState";
 import { ensureWorkerTick } from "@/lib/ensureWorkerTick";
+import { requireOwner, unauthorizedJson } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const ALLOWED = new Set([RITUAL_CHAIN_ID, SEPOLIA_ID, BASE_MAINNET_ID]);
 
-export async function GET() {
+export async function GET(req: Request) {
   await ensureDb();
+  const auth = await requireOwner(req);
+  if (!auth.ok) return unauthorizedJson(auth);
+
   const rules = await prisma.rule.findMany({ orderBy: { createdAt: "desc" } });
   // Publish local rules into shared snapshot (fixes pre-fix multi-instance drift)
   if (rules.length > 0) {
@@ -27,6 +31,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   await ensureDb();
+  const auth = await requireOwner(req);
+  if (!auth.ok) return unauthorizedJson(auth);
+
   const body = (await req.json()) as Record<string, unknown>;
   const type = String(body.type || "");
   const action = String(body.action || "");

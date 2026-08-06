@@ -1,6 +1,7 @@
 import { prisma } from "@rra/core";
 import { ensureDb } from "@/lib/server";
 import { persistDurableState } from "@/lib/durableState";
+import { requireOwner, unauthorizedJson } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,9 @@ const DELETABLE = ["dry_run", "error"] as const;
  */
 export async function DELETE(req: Request) {
   await ensureDb();
+  const auth = await requireOwner(req);
+  if (!auth.ok) return unauthorizedJson(auth);
+
   let body: { id?: string; clear?: string } = {};
   try {
     body = (await req.json()) as { id?: string; clear?: string };

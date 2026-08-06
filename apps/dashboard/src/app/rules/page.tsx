@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { api } from "@/lib/api";
 
 const WEEKDAYS = [
   { v: "1", label: "Monday" },
@@ -92,13 +93,18 @@ export default function RulesPage() {
   const [ok, setOk] = useState("");
 
   const load = () =>
-    fetch("/api/rules")
-      .then((r) => r.json())
-      .then(setRules)
+    api("/api/rules")
+      .then(async (r) => {
+        if (!r.ok) {
+          setRules([]);
+          return;
+        }
+        setRules(await r.json());
+      })
       .catch(() => {});
 
   useEffect(() => {
-    fetch("/api/config")
+    api("/api/config")
       .then((r) => r.json())
       .then(setConfig)
       .catch(() => {});
@@ -153,7 +159,7 @@ export default function RulesPage() {
     setErr("");
     setOk("");
     try {
-      const res = await fetch("/api/rules", {
+      const res = await api("/api/rules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -180,7 +186,7 @@ export default function RulesPage() {
   async function setStatus(id: string, status: string) {
     setErr("");
     try {
-      const res = await fetch(`/api/rules/${encodeURIComponent(id)}`, {
+      const res = await api(`/api/rules/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -205,7 +211,7 @@ export default function RulesPage() {
     const prev = rules;
     setRules((list) => list.filter((r) => r.id !== id));
     try {
-      const res = await fetch(`/api/rules/${encodeURIComponent(id)}`, {
+      const res = await api(`/api/rules/${encodeURIComponent(id)}`, {
         method: "DELETE",
       });
       const data = await res.json().catch(() => ({}));

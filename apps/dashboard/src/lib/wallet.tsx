@@ -8,16 +8,30 @@ import {
   useMemo,
   useState,
 } from "react";
+import { api } from "@/lib/api";
+
+type AuthState = {
+  authenticated: boolean;
+  authorized: boolean;
+  sessionAddress: string | null;
+  agentEvm: string | null;
+  signingIn: boolean;
+  authError: string | null;
+};
 
 type WalletCtx = {
   address: string | null;
   chainId: number | null;
   connecting: boolean;
   connect: () => Promise<void>;
-  disconnect: () => void;
+  disconnect: () => Promise<void>;
   switchToRitual: () => Promise<void>;
   switchToBase: () => Promise<void>;
   switchToSepolia: () => Promise<void>;
+  /** SIWE session — must be authorized to see rules/history */
+  auth: AuthState;
+  refreshAuth: () => Promise<void>;
+  signIn: () => Promise<boolean>;
 };
 
 const Ctx = createContext<WalletCtx | null>(null);
@@ -53,15 +67,135 @@ async function switchChain(chainId: number, add?: Record<string, unknown>) {
   }
 }
 
+const emptyAuth: AuthState = {
+  authenticated: false,
+  authorized: false,
+  sessionAddress: null,
+  agentEvm: null,
+  signingIn: false,
+  authError: null,
+};
+
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [auth, setAuth] = useState<AuthState>(emptyAuth);
+
+  const refreshAuth = useCallback(async () => {
+    try {
+      const res = await api("/api/auth/session");
+      const data = await res.json();
+      setAuth((a) => ({
+        ...a,
+        authenticated: Boolean(data.authenticated),
+        authorized: Boolean(data.authorized),
+        sessionAddress: data.address || null,
+        agentEvm: data.agentEvm || null,
+        authError: null,
+      }));
+    } catch {
+      setAuth((a) => ({
+        ...a,
+        authenticated: false,
+        authorized: false,
+        sessionAddress: null,
+      }));
+    }
+  }, []);
+
+  const signIn = useCallback(async (): Promise<boolean> => {
+    const eth = getEth();
+    const accounts = eth
+      ? ((await eth.request({ method: "eth_accounts" })) as string[])
+      : [];
+    const addr = accounts[0];
+    if (!eth || !addr) {
+      setAuth((a) => ({
+        ...a,
+        authError: "Connect a wallet first",
+        signingIn: false,
+      }));
+      return false;
+    }
+
+    setAuth((a) => ({ ...a, signingIn: true, authError: null }));
+    try {
+      const nonceRes = await api("/api/auth/nonce");
+      const { nonce } = await nonceRes.json();
+      if (!nonce) throw new Error("No nonce");
+
+      const msgRes = await api("/api/auth/verify", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: addr,
+          nonce,
+          chainId: chainId ?? RITUAL_ID,
+        }),
+      });
+      const { message } = await msgRes.json();
+      if (!message) throw new Error("No login message");
+
+      const signature = (await eth.request({
+        method: "personal_sign",
+        params: [message, addr],
+      })) as string;
+
+      const verifyRes = await api("/api/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: addr,
+          signature,
+          message,
+          nonce,
+          chainId: chainId ?? RITUAL_ID,
+        }),
+      });
+      const data = await verifyRes.json();
+
+      if (!verifyRes.ok || !data.authorized) {
+        setAuth({
+          authenticated: false,
+          authorized: false,
+          sessionAddress: null,
+          agentEvm: data.agentEvm || null,
+          signingIn: false,
+          authError:
+            data.error ||
+            "This wallet is not the agent. Connect the agent EOA to view history and rules.",
+        });
+        return false;
+      }
+
+      setAuth({
+        authenticated: true,
+        authorized: true,
+        sessionAddress: data.address,
+        agentEvm: data.agentEvm || null,
+        signingIn: false,
+        authError: null,
+      });
+      return true;
+    } catch (e) {
+      setAuth((a) => ({
+        ...a,
+        signingIn: false,
+        authenticated: false,
+        authorized: false,
+        authError: e instanceof Error ? e.message : "Sign-in failed",
+      }));
+      return false;
+    }
+  }, [chainId]);
 
   const refresh = useCallback(async () => {
     const eth = getEth();
     if (!eth) return;
-    const accounts = (await eth.request({ method: "eth_accounts" })) as string[];
+    const accounts = (await eth.request({
+      method: "eth_accounts",
+    })) as string[];
     setAddress(accounts[0] || null);
     const hex = (await eth.request({ method: "eth_chainId" })) as string;
     setChainId(Number(hex));
@@ -69,9 +203,18 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void refresh();
+    void refreshAuth();
     const eth = getEth();
     if (!eth?.on) return;
-    const onAcc = () => void refresh();
+    const onAcc = () => {
+      void (async () => {
+        await refresh();
+        // Account switched — drop session and require re-sign
+        await api("/api/auth/logout", { method: "POST" });
+        setAuth(emptyAuth);
+        await refreshAuth();
+      })();
+    };
     const onChain = () => void refresh();
     eth.on("accountsChanged", onAcc);
     eth.on("chainChanged", onChain);
@@ -79,7 +222,22 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       eth.removeListener?.("accountsChanged", onAcc);
       eth.removeListener?.("chainChanged", onChain);
     };
-  }, [refresh]);
+  }, [refresh, refreshAuth]);
+
+  // Auto sign-in when wallet is connected but session missing/mismatched
+  useEffect(() => {
+    if (!address) return;
+    if (auth.signingIn) return;
+    if (
+      auth.authorized &&
+      auth.sessionAddress &&
+      auth.sessionAddress.toLowerCase() === address.toLowerCase()
+    ) {
+      return;
+    }
+    // Connected but not authorized for this address — attempt SIWE once
+    void signIn();
+  }, [address]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const connect = useCallback(async () => {
     const eth = getEth();
@@ -105,13 +263,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         /* user may stay on current chain */
       }
       await refresh();
+      await signIn();
     } finally {
       setConnecting(false);
     }
-  }, [refresh]);
+  }, [refresh, signIn]);
 
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
+    await api("/api/auth/logout", { method: "POST" }).catch(() => {});
     setAddress(null);
+    setAuth(emptyAuth);
   }, []);
 
   const switchToRitual = useCallback(async () => {
@@ -154,6 +315,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       switchToRitual,
       switchToBase,
       switchToSepolia,
+      auth,
+      refreshAuth,
+      signIn,
     }),
     [
       address,
@@ -164,6 +328,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       switchToRitual,
       switchToBase,
       switchToSepolia,
+      auth,
+      refreshAuth,
+      signIn,
     ]
   );
 

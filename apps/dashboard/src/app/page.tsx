@@ -7,6 +7,7 @@ import {
   explorerTxUrl,
   shortHash,
 } from "@/lib/explorer";
+import { api } from "@/lib/api";
 
 const STATUS_CLS: Record<string, string> = {
   executed: "text-emerald-300 bg-emerald-400/10",
@@ -37,9 +38,14 @@ export default function OverviewPage() {
   const [copied, setCopied] = useState("");
 
   const load = useCallback(() => {
-    fetch("/api/status")
-      .then((r) => r.json())
-      .then(setStatus)
+    api("/api/status")
+      .then(async (r) => {
+        if (!r.ok) {
+          setStatus(null);
+          return;
+        }
+        setStatus(await r.json());
+      })
       .catch(() => {});
   }, []);
 
@@ -67,7 +73,7 @@ export default function OverviewPage() {
   async function deleteAction(id: string) {
     setDeleting(id);
     try {
-      const res = await fetch("/api/actions", {
+      const res = await api("/api/actions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
@@ -96,7 +102,7 @@ export default function OverviewPage() {
     }
     setDeleting("bulk");
     try {
-      const res = await fetch("/api/actions", {
+      const res = await api("/api/actions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clear: "deletable" }),

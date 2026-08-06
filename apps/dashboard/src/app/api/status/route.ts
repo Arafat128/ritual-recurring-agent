@@ -2,6 +2,7 @@ import { prisma, getSetting, getAppLimits } from "@rra/core";
 import { ensureDb } from "@/lib/server";
 import { ensureWorkerTick } from "@/lib/ensureWorkerTick";
 import { readWorkerCache, workerIsOnline } from "@/lib/workerCache";
+import { requireOwner, unauthorizedJson } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -13,8 +14,10 @@ function startOfUtcDay(): Date {
   );
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   await ensureDb();
+  const auth = await requireOwner(req);
+  if (!auth.ok) return unauthorizedJson(auth);
 
   // Hobby plan: only 1 cron/day — keep worker alive while dashboard is open
   let tickMeta: { triggered: boolean } = { triggered: false };

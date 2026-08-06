@@ -4,6 +4,7 @@ import {
   markRulesDeleted,
   persistDurableState,
 } from "@/lib/durableState";
+import { requireOwner, unauthorizedJson } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,9 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   await ensureDb();
+  const auth = await requireOwner(req);
+  if (!auth.ok) return unauthorizedJson(auth);
+
   const id = params.id;
   if (!id) {
     return Response.json({ error: "id required" }, { status: 400 });
@@ -41,10 +45,13 @@ export async function PATCH(
  * - Detaches related actions (keeps history)
  */
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
   await ensureDb();
+  const auth = await requireOwner(req);
+  if (!auth.ok) return unauthorizedJson(auth);
+
   const id = params.id;
   if (!id) {
     return Response.json({ error: "id required" }, { status: 400 });

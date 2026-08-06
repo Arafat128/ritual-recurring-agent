@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { api } from "@/lib/api";
 
 type Limits = {
   maxTxUsd: number;
@@ -24,17 +25,19 @@ export default function SettingsPage() {
   }, []);
 
   const load = useCallback(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((s) => {
+    api("/api/settings")
+      .then(async (r) => {
+        if (!r.ok) return;
+        const s = await r.json();
         setStatus(s);
         if (s.limits) applyLimits(s.limits as Limits);
         if (s.usage?.actionsToday != null) setUsageToday(s.usage.actionsToday);
       })
       .catch(() => {});
-    fetch("/api/status")
-      .then((r) => r.json())
-      .then((s) => {
+    api("/api/status")
+      .then(async (r) => {
+        if (!r.ok) return;
+        const s = await r.json();
         setStatus((prev: any) => ({ ...prev, agentEvm: s.agentEvm, ...s }));
         if (s.limits) applyLimits(s.limits as Limits);
         if (s.usage?.actionsToday != null) setUsageToday(s.usage.actionsToday);
@@ -63,7 +66,7 @@ export default function SettingsPage() {
       if (!Number.isFinite(sec) || sec < 10 || sec > 600) {
         throw new Error("Worker interval must be 10–600 seconds");
       }
-      const res = await fetch("/api/settings", {
+      const res = await api("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

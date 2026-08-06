@@ -1,6 +1,7 @@
 import { getSetting, getAppLimits, setAppLimits, prisma } from "@rra/core";
 import { ensureDb } from "@/lib/server";
 import { persistDurableState } from "@/lib/durableState";
+import { requireOwner, unauthorizedJson } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +12,11 @@ function startOfUtcDay(): Date {
   );
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   await ensureDb();
+  const auth = await requireOwner(req);
+  if (!auth.ok) return unauthorizedJson(auth);
+
   const [agent, limits] = await Promise.all([
     getSetting("agent.evm"),
     getAppLimits(),
@@ -45,6 +49,9 @@ type PatchBody = {
 
 export async function PATCH(req: Request) {
   await ensureDb();
+  const auth = await requireOwner(req);
+  if (!auth.ok) return unauthorizedJson(auth);
+
   let body: PatchBody;
   try {
     body = (await req.json()) as PatchBody;
