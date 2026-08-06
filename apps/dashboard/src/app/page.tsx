@@ -214,10 +214,10 @@ export default function OverviewPage() {
         )}
         {!status?.worker?.online && (
           <p className="mt-2 text-[11px] text-amber-200/80">
-            Worker offline — on Vercel the cron tick runs every minute (
-            <code className="text-white/50">/api/cron/worker</code>
-            ). Locally run <code className="text-white/50">npm run worker</code>
-            .
+            Worker offline — open this page a moment (status poll starts the
+            Vercel tick) or run <code className="text-white/50">npm run worker</code>{" "}
+            locally. Hobby plan: daily cron + live ticks while the dashboard is
+            open.
           </p>
         )}
         <div className="mt-4 flex flex-wrap gap-2">

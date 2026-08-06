@@ -1,8 +1,10 @@
 import { prisma, getSetting, getDryRun, getAppLimits } from "@rra/core";
 import { ensureDb } from "@/lib/server";
+import { ensureWorkerTick } from "@/lib/ensureWorkerTick";
 import { readWorkerCache, workerIsOnline } from "@/lib/workerCache";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function startOfUtcDay(): Date {
   const d = new Date();
@@ -13,6 +15,15 @@ function startOfUtcDay(): Date {
 
 export async function GET() {
   await ensureDb();
+
+  // Hobby plan: only 1 cron/day — keep worker alive while dashboard is open
+  let tickMeta: { triggered: boolean } = { triggered: false };
+  try {
+    tickMeta = await ensureWorkerTick();
+  } catch (e) {
+    console.warn("[status] ensureWorkerTick", e);
+  }
+
   const since = startOfUtcDay();
   const [
     rules,
@@ -70,6 +81,7 @@ export async function GET() {
       online,
       host: host || (process.env.VERCEL ? "vercel" : "local"),
       mode: cached?.mode ?? null,
+      tickOnStatus: tickMeta.triggered,
     },
     limits,
     usage: { actionsToday, dayUtc: since.toISOString().slice(0, 10) },
